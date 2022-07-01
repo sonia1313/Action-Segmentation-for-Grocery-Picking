@@ -5,8 +5,8 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 
-class ManyToManyLSTM(pl.LightningModule, ABC):
-    def __init__(self, n_features=9, hidden_size=100, n_layers=1, n_classes=6):
+class ManyToManyLSTM(pl.LightningModule):
+    def __init__(self, n_features=3, hidden_size=100, n_layers=1, n_classes=6):
         super().__init__()
 
         self.n_features = n_features
@@ -24,16 +24,20 @@ class ManyToManyLSTM(pl.LightningModule, ABC):
     def forward(self, x):
         batch_size = x.shape[0]
         #
-        h0 = torch.zeros(self.n_layers, batch_size, self.hidden_size)
-        c0 = torch.zeros(self.n_layers, batch_size, self.hidden_size)
-        #
-        #h0, c0 = self._init_states(batch_size)
+        # h0 = torch.zeros(self.n_layers, batch_size, self.hidden_size)
+        # c0 = torch.zeros(self.n_layers, batch_size, self.hidden_size)
+        # #
+        h0, c0 = self._init_states(batch_size)
 
-        output, (_, _) = self.lstm(x, (h0, c0))
+        output, (h_n, c_n) = self.lstm(x, (h0, c0))
+        #shape of output: (1,142,100) - corresponds to a hidden state at each time step
+        #shape of h_n: (1,1,100) - corresponds to the hidden_state from the last time time step only
+
 
         frames = output.view(-1, output.shape[2])  # flatten
-
+        #shape of frames: (142,100)
         logits = self.linear(frames)
+        #shape of logits: (142,6)
 
         return logits
 

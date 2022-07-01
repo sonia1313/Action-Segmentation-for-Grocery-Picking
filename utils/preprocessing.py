@@ -12,18 +12,28 @@ import torch
 
 
 def get_files(PATH_TO_DIR):
-    files = glob.glob(f"{PATH_TO_DIR}/dataset/avocado/clutter/[0-9]*/optoforce_data.csv")
-    labels = glob.glob(f"{PATH_TO_DIR}/dataset/avocado/clutter/[0-9]*/labels")
+    files = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
+    labels = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/labels")
     return files, labels
 
 
-def read_data(files, labels):
-    """reads every 830th frame which is approx 1FPS"""
+def read_data(files, labels, fps = 10):
+    """ 840 frames is approx 1FPS"""
+    nth_frame = 840//fps
     frames = []
     for file in files:
         data_df = pd.read_csv(file)
-        data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
-        data_df = data_df.iloc[::830, :]
+        # data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
+
+        data_df = data_df.iloc[::nth_frame, :] #
+        data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
+        data_df['middle'] = np.linalg.norm(data_df[['middle_x', 'middle_y', 'middle_z']].values, axis=1)
+        data_df['thumb'] = np.linalg.norm(data_df[['thumb_x', 'thumb_y', 'thumb_z']].values, axis=1)
+
+        data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z',
+                                        'index_x', 'index_y', 'index_z',
+                                        'middle_x', 'middle_y', 'middle_z',
+                                        'thumb_x', 'thumb_y', 'thumb_z'])
         data_df["label"] = ""
         frames.append(data_df)
 
@@ -58,8 +68,7 @@ def append_labels_per_frame(frames, action_segment_td, ground_truth_actions):
 
 
 def standardise_features(frames,
-                         features=['index_x', 'index_y', 'index_z', 'middle_x', 'middle_y', 'middle_z', 'thumb_x',
-                                   'thumb_y', 'thumb_z']):
+                         features=['index', 'middle', 'thumb']):
     for frame in frames:
         for feature in frame[features]:
             mean = frame[feature].mean()
@@ -73,32 +82,34 @@ def standardise_features(frames,
 def one_hot_encode_labels(frames):
     unique_actions = set()
 
+
     for frame in frames:
         for label in frame['label']:
             unique_actions.add(label)
-
+    #print(unique_actions)
     one_hot_encoding_acts = pd.get_dummies(list(unique_actions))
-    index_label_map = {np.argmax(v): k for k, v in one_hot_encoding_acts.items()}
-
+    label_to_index_map = {k: np.argmax(v) for k, v in one_hot_encoding_acts.items()}
+    # print(label_to_index_map)
     actions_per_seq = []
     for frame in frames:
         action_encodings = []
         for i in range(0, len(frame)):
-            action_encodings.append(one_hot_encoding_acts[frame['label'].iloc[i]])
+            #action_encodings.append(one_hot_encoding_acts[frame['label'].iloc[i]])
+            action_encodings.append(label_to_index_map[frame['label'].iloc[i]])
         actions_per_seq.append(action_encodings)
 
-    return actions_per_seq, unique_actions, index_label_map
+    return actions_per_seq, unique_actions, label_to_index_map
 
 
-def pad_data(frames, actions_per_seq):
-    features = ['index_x', 'index_y', 'index_z', 'middle_x', 'middle_y', 'middle_z', 'thumb_x', 'thumb_y', 'thumb_z']
+def pad_data(frames, actions_per_seq, n_features = 3, n_classes = 6, n_sequences = 30):
+    features = ['index', 'middle', 'thumb']
     max_length = max([len(frame) for frame in frames])
     numeric_features_per_seq = [np.array(frames[i][features]) for i in range(len(frames))]
 
     labels_per_seq = [np.array(actions_per_seq[i]) for i in range(len(actions_per_seq))]
 
-    padded_numeric_features_per_seq = np.zeros((10, max_length, 9))
-    padded_labels_per_seq = -1 * np.ones((10, max_length, 6))
+    padded_numeric_features_per_seq = np.zeros((n_sequences, max_length, n_features))
+    padded_labels_per_seq = -1 * np.ones((n_sequences, max_length,))
     for i in range(len(numeric_features_per_seq)):
         last_timestep = numeric_features_per_seq[i][-1:][0]
         repeat_n = max_length - numeric_features_per_seq[i].shape[0]
@@ -110,6 +121,6 @@ def pad_data(frames, actions_per_seq):
     for i in range(len(labels_per_seq)):
         seq_len = labels_per_seq[i].shape[0]
 
-        padded_labels_per_seq[i][:seq_len, :] = labels_per_seq[i]
+        padded_labels_per_seq[i][:seq_len] = labels_per_seq[i]
 
     return torch.FloatTensor(padded_numeric_features_per_seq), torch.LongTensor(padded_labels_per_seq)

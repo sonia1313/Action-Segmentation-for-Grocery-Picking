@@ -14,9 +14,9 @@ class OpToForceDataset(Dataset):
         return self.X[item], self.y[item]
 
 
-def load_data(x_data, y_data):
-    train_size = int(0.6 * len(x_data))
-    val_size, test_size = int(0.2 * len(x_data)), int(0.2 * len(x_data))
+def load_data(x_data, y_data, train_size = 20, val_size = 5,test_size = 5):
+    #train_size = int(0.6 * len(x_data))
+    #val_size, test_size = int(0.2 * len(x_data)), int(0.2 * len(x_data))
 
     dataset = OpToForceDataset(x_data, y_data)
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
