@@ -1,5 +1,7 @@
 import glob
 import os
+import re
+
 import pandas as pd
 import numpy as np
 
@@ -11,21 +13,25 @@ import numpy as np
 import torch
 
 
-def get_files(PATH_TO_DIR):
-    files = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
-    labels = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/labels")
+def get_files(path):
+    # files = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
+    # labels = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/labels")
+    files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
+    labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
     return files, labels
 
 
-def read_data(files, labels, fps = 10):
+def read_data(files, labels, fps=1):
     """ 840 frames is approx 1FPS"""
-    nth_frame = 840//fps
+    #840
+    nth_frame = 840 // fps
     frames = []
     for file in files:
+        fruit_and_env = re.findall('avocado|banana|blueberry|clutter|single', file)
         data_df = pd.read_csv(file)
         # data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
 
-        data_df = data_df.iloc[::nth_frame, :] #
+        data_df = data_df.iloc[::nth_frame, :]  #
         data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
         data_df['middle'] = np.linalg.norm(data_df[['middle_x', 'middle_y', 'middle_z']].values, axis=1)
         data_df['thumb'] = np.linalg.norm(data_df[['thumb_x', 'thumb_y', 'thumb_z']].values, axis=1)
@@ -34,6 +40,8 @@ def read_data(files, labels, fps = 10):
                                         'index_x', 'index_y', 'index_z',
                                         'middle_x', 'middle_y', 'middle_z',
                                         'thumb_x', 'thumb_y', 'thumb_z'])
+        data_df["fruit"] = fruit_and_env[0]
+        data_df["environment"] = fruit_and_env[1]
         data_df["label"] = ""
         frames.append(data_df)
 
@@ -79,29 +87,29 @@ def standardise_features(frames,
     return frames
 
 
-def one_hot_encode_labels(frames):
-    unique_actions = set()
+def encode_labels(frames):
+    # unique_actions = set()
 
-
-    for frame in frames:
-        for label in frame['label']:
-            unique_actions.add(label)
-    #print(unique_actions)
-    one_hot_encoding_acts = pd.get_dummies(list(unique_actions))
-    label_to_index_map = {k: np.argmax(v) for k, v in one_hot_encoding_acts.items()}
+    label_to_index_map = {'move-in': 0, 'manipulate': 1, 'grasp': 2, 'pick-up': 3, 'move-out': 4, 'drop': 5}
+    # for frame in frames:
+    #     for label in frame['label']:
+    #         unique_actions.add(label)
+    # print(unique_actions)
+    #one_hot_encoding_acts = pd.get_dummies(list(unique_actions))
+    #label_to_index_map = {k: np.argmax(v) for k, v in one_hot_encoding_acts.items()}
     # print(label_to_index_map)
     actions_per_seq = []
     for frame in frames:
         action_encodings = []
         for i in range(0, len(frame)):
-            #action_encodings.append(one_hot_encoding_acts[frame['label'].iloc[i]])
+            # action_encodings.append(one_hot_encoding_acts[frame['label'].iloc[i]])
             action_encodings.append(label_to_index_map[frame['label'].iloc[i]])
         actions_per_seq.append(action_encodings)
 
-    return actions_per_seq, unique_actions, label_to_index_map
+    return actions_per_seq, label_to_index_map
 
 
-def pad_data(frames, actions_per_seq, n_features = 3, n_classes = 6, n_sequences = 30):
+def pad_data(frames, actions_per_seq, n_features=3, n_classes=6, n_sequences=30):
     features = ['index', 'middle', 'thumb']
     max_length = max([len(frame) for frame in frames])
     numeric_features_per_seq = [np.array(frames[i][features]) for i in range(len(frames))]
@@ -124,3 +132,36 @@ def pad_data(frames, actions_per_seq, n_features = 3, n_classes = 6, n_sequences
         padded_labels_per_seq[i][:seq_len] = labels_per_seq[i]
 
     return torch.FloatTensor(padded_numeric_features_per_seq), torch.LongTensor(padded_labels_per_seq)
+
+
+def remove_padding(predictions_padded, targets_padded):
+    print(f"shape of padded targets {targets_padded.shape}")
+    mask = (targets_padded >= 0).long()  # only outputs labels that is >= 0
+    # print(mask)
+    print(f"shape of mask {mask.shape}")
+
+    n = len([out for out in mask.squeeze() if out.all() >= 1])
+    # print(n)
+    outputs = predictions_padded.squeeze()[:n, :]
+    # print(f"unpadded outputs {outputs.shape}")
+
+    targets_padded = targets_padded.squeeze()
+    targets = targets_padded[:n]
+    # print(f"unpadded targets {targets.shape}")
+    # _, targets = targets.max(dim=1)  # remove one hot encoding
+
+    return outputs.unsqueeze(0), targets.unsqueeze(0)
+
+
+def preprocess_dataset(cfg_preprocess):
+
+    files, labels = get_files(cfg_preprocess['data_path'])
+
+    frames, action_segment_td, ground_truth_actions = read_data(files, labels, cfg_preprocess['frames_per_sec'])
+    frames = standardise_features(append_labels_per_frame(frames, action_segment_td, ground_truth_actions))
+    actions_per_seq, label_to_index_map = encode_labels(frames)
+    X_data, y_data = pad_data(frames, actions_per_seq, n_features=cfg_preprocess['n_features'],
+                              n_sequences=cfg_preprocess['n_sequences'],
+                              )
+
+    return X_data, y_data, label_to_index_map
