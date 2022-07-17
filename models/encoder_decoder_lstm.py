@@ -76,10 +76,10 @@ class DecoderLSTM(torch.nn.Module):
 # decoder uses context vector to predict h0, h1, h2...hn
 # decoder can also use teacher forcing [h0,y0],[h1,y1],[h2,y2]
 class EncoderDecoderLSTM(nn.Module):
-    def __init__(self):
+    def __init__(self,n_features, hidden_size, n_layers):
         super().__init__()
-        self.encoder = EncoderLSTM()
-        self.decoder = DecoderLSTM()
+        self.encoder = EncoderLSTM(n_features, hidden_size, n_layers)
+        self.decoder = DecoderLSTM(hidden_size)
 
         assert self.encoder.hidden_size == self.decoder.hidden_size
 
@@ -126,10 +126,10 @@ class EncoderDecoderLSTM(nn.Module):
 
 
 class LitEncoderDecoderLSTM(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, n_features, hidden_size, n_layers):
         super().__init__()
 
-        self.encoder_decoder_model = EncoderDecoderLSTM()
+        self.encoder_decoder_model = EncoderDecoderLSTM(n_features, hidden_size, n_layers)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.train_acc = Accuracy(ignore_index=-1)
         self.val_acc = Accuracy(ignore_index=-1)
@@ -183,12 +183,23 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
         self.log('test_PPL', test_perplexity, on_step=False, on_epoch=True, prog_bar=True)
         # return test_loss
 
+
+    def predict_step(self,batch, batch_idx):
+        X, y = batch
+
+        logits, _ = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+
+        return logits, y
+
     def _get_preds_and_loss(self, X, y, teacher_forcing):
         logits = self(X, y, teacher_forcing)
         logits = logits.squeeze(0)  # remove the batch dimension
         loss = self.loss_module(logits, y.squeeze(0))
 
         return logits, loss
+
+
+
 
 # TODO: Implement attention mechanism
 # class AttentionDecoder():

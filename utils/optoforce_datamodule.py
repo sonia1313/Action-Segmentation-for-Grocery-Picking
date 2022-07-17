@@ -17,7 +17,9 @@ from typing import Any, Dict, List, Optional, Type
 from pytorch_lightning.trainer.states import TrainerFn
 from sklearn.model_selection import KFold
 from models.encoder_decoder_lstm import LitEncoderDecoderLSTM
+
 PATH_TO_DIR = 'C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project'
+
 
 #############################################################################################
 #                           KFold Loop / Cross Validation Example                           #
@@ -33,7 +35,6 @@ PATH_TO_DIR = 'C:/Users/sonia/OneDrive - Queen Mary, University of London/Action
 #############################################################################################
 
 
-
 class BaseKFoldDataModule(pl.LightningDataModule, ABC):
     @abstractmethod
     def setup_folds(self, num_folds: int):
@@ -42,6 +43,7 @@ class BaseKFoldDataModule(pl.LightningDataModule, ABC):
     @abstractmethod
     def setup_fold_index(self, fold_index: int):
         pass
+
 
 #############################################################################################
 #                           Step 2 / 5: Implement the KFoldDataModule                       #
@@ -58,12 +60,12 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, X_data: [float], y_data: [int], batch_size: int = 1, train_size = 25, test_size = 5):
+    def __init__(self, X_data: [float], y_data: [int], batch_size: int = 1, train_size=25, test_size=5):
         self.batch_size = batch_size
         self.X_data = X_data
         self.y_data = y_data
-        self.train_size = train_size #25 when using clutter
-        self.test_size = test_size #5 when using clutter
+        self.train_size = train_size  # 25 when using clutter
+        self.test_size = test_size  # 5 when using clutter
         self.prepare_data_per_node = True
         self._log_hyperparams = True
 
@@ -78,7 +80,8 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if stage is None or stage == 'fit':
             dataset = OpToForceDataset(self.X_data, self.y_data)
-            self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size], generator=torch.Generator().manual_seed(42))
+            self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size],
+                                                                 generator=torch.Generator().manual_seed(42))
 
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
@@ -99,6 +102,9 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)
 
+    def predict_dataloader(self) -> DataLoader:
+        return DataLoader(self.test_dataset)
+
     def __post_init__(cls):
         super().__init__()
 
@@ -107,40 +113,44 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 # averaged when estimating the model’s predictive performance on the test dataset.
 class EnsembleVotingModel(pl.LightningModule):
 
-    def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str]) -> None:
+    def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
+                 n_features: int, hidden_size: int, n_layers: int) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
-        self.models = torch.nn.ModuleList([model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
+        self.n_features = n_features
+        self.hidden_size = hidden_size
+        self.n_layers = n_layers
+
+        self.models = torch.nn.ModuleList(
+            [model_cls.load_from_checkpoint(p, n_features=self.n_features,
+                                            hidden_size=self.hidden_size,
+                                            n_layers=self.n_layers) for p in checkpoint_paths])
         self.acc = Accuracy(ignore_index=-1)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
-
         # Compute the averaged predictions over the `num_folds` models.
         X, y = batch
 
-        #print(f"test_step_from ensemble: {X[0]}")
+        # print(f"test_step_from ensemble: {X[0]}")
 
         logits_per_model = []
 
         for m in self.models:
-            logits = self._get_preds(m,X,y) #not sure if this will work
+            logits = self._get_preds(m, X, y)  # not sure if this will work
             logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
 
-
-        loss = self.loss_module(logits,y.squeeze(0))
+        loss = self.loss_module(logits, y.squeeze(0))
         self.acc(logits, y.squeeze(0))
 
         self.log("average_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("average test_acc", self.acc, on_step=False, on_epoch=True, prog_bar=True)
 
-
-    def _get_preds(self,model, X,y, teacher_forcing = 0.0):
-
-        logits = model(X,y,teacher_forcing)
-        logits = logits.squeeze(0) #remove the batch dimension
+    def _get_preds(self, model, X, y, teacher_forcing=0.0):
+        logits = model(X, y, teacher_forcing)
+        logits = logits.squeeze(0)  # remove the batch dimension
         return logits
 
 
@@ -172,11 +182,15 @@ class EnsembleVotingModel(pl.LightningModule):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, num_folds: int, export_path: str) -> None:
+    def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
         self.export_path = export_path
+
+        self.n_features = n_features
+        self.hidden_size = hidden_size
+        self.n_layers = n_layers
 
     @property
     def done(self) -> bool:
@@ -221,7 +235,10 @@ class KFoldLoop(Loop):
     def on_run_end(self) -> None:
         """Used to compute the performance of the ensemble model on the test set."""
         checkpoint_paths = [osp.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
-        voting_model = EnsembleVotingModel(type(self.trainer.lightning_module), checkpoint_paths)
+        voting_model = EnsembleVotingModel(type(self.trainer.lightning_module), checkpoint_paths
+                                           , n_features=self.n_features,
+                                           hidden_size=self.hidden_size,
+                                           n_layers=self.n_layers)
         voting_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
         self.trainer.strategy.connect(voting_model)
@@ -254,24 +271,24 @@ class KFoldLoop(Loop):
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
 
-
-if __name__ == "__main__":
-    pl.seed_everything(42)
-    X_data, y_data, labels_map = preprocess_dataset(PATH_TO_DIR)
-    model = LitEncoderDecoderLSTM()
-    datamodule = OpToForceKFoldDataModule(X_data,y_data)
-    trainer = pl.Trainer(
-        max_epochs=10,
-        limit_train_batches=1,
-        limit_val_batches=1,
-        limit_test_batches=1,
-        num_sanity_val_steps=0,
-        #devices=2,
-        accelerator="auto",
-        #strategy="ddp", #gives AttributeError: 'DistributedDataParallel' object has no attribute 'test_step'
-    )
-
-    internal_fit_loop = trainer.fit_loop
-    trainer.fit_loop = KFoldLoop(5, export_path="./")
-    trainer.fit_loop.connect(internal_fit_loop)
-    trainer.fit(model, datamodule)
+#
+# if __name__ == "__main__":
+#     pl.seed_everything(42)
+#     X_data, y_data, labels_map = preprocess_dataset(PATH_TO_DIR)
+#     model = LitEncoderDecoderLSTM(n_features = 3, hidden_size = 100, n_layers = 1)
+#     datamodule = OpToForceKFoldDataModule(X_data, y_data)
+#     trainer = pl.Trainer(
+#         max_epochs=10,
+#         limit_train_batches=1,
+#         limit_val_batches=1,
+#         limit_test_batches=1,
+#         num_sanity_val_steps=0,
+#         # devices=2,
+#         accelerator="auto",
+#         # strategy="ddp", #gives AttributeError: 'DistributedDataParallel' object has no attribute 'test_step'
+#     )
+#
+#     internal_fit_loop = trainer.fit_loop
+#     trainer.fit_loop = KFoldLoop(5, export_path="cross-validation/encoder_decoder_kfold")
+#     trainer.fit_loop.connect(internal_fit_loop)
+#     trainer.fit(model, datamodule)

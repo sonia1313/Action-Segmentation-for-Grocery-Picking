@@ -54,10 +54,10 @@ class ManyToManyLSTM(nn.Module):
 
 class LitManyToManyLSTM(pl.LightningModule):
 
-    def __init__(self):
+    def __init__(self, n_features, hidden_size, n_layers):
         super().__init__()
 
-        self.lstm = ManyToManyLSTM()
+        self.lstm = ManyToManyLSTM(n_features, hidden_size, n_layers)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.train_acc = Accuracy(ignore_index=-1)
         self.val_acc = Accuracy(ignore_index=-1)

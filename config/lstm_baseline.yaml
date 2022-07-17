@@ -6,7 +6,7 @@ seed: 42
 dataset:
   preprocess:
     data_path: dataset
-    frames_per_sec: 1
+    frames_per_sec: 1 #15 #84
     standardise_data: True
     feature_engineering: True
     n_features: 3
@@ -14,10 +14,11 @@ dataset:
     n_sequences: 30
 
 model:
-  module_name: encoder_decoder_lstm
-  pl_class_name : LitEncoderDecoderLSTM
-  script_path: models/encoder_decoder_lstm.py
+  module_name: lstm
+  pl_class_name : LitManyToManyLSTM
+  script_path: models/baseline_lstm_1_layer.py
   n_layers: 1
+  n_features: 3
   n_hidden_units: 100
 
 train:
@@ -25,6 +26,8 @@ train:
   batch_size: 1
   epochs: 10
   gpus: 0
+  k_fold_path: cross-validation/lstm_kfold
+  n_k_folds: 5
 
 test:
   checkpoint_path: train/lightning_logs/checkpoints

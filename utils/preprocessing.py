@@ -14,8 +14,8 @@ import torch
 
 
 def get_files(path):
-    # files = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
-    # labels = glob.glob(f"{PATH_TO_DIR}/dataset/*/clutter/[0-9]*/labels")
+    #files = glob.glob(f"{path}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
+    #labels = glob.glob(f"{path}/dataset/*/clutter/[0-9]*/labels")
     files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
     labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
     return files, labels
@@ -156,7 +156,7 @@ def remove_padding(predictions_padded, targets_padded):
 def preprocess_dataset(cfg_preprocess):
 
     files, labels = get_files(cfg_preprocess['data_path'])
-
+    #files, labels = get_files(cfg_preprocess)
     frames, action_segment_td, ground_truth_actions = read_data(files, labels, cfg_preprocess['frames_per_sec'])
     frames = standardise_features(append_labels_per_frame(frames, action_segment_td, ground_truth_actions))
     actions_per_seq, label_to_index_map = encode_labels(frames)
