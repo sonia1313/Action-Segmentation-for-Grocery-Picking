@@ -11,6 +11,7 @@ import numpy as np
 #
 # PATH_TO_DIR = os.chdir("/content/drive/Othercomputers/Dell")
 import torch
+np.random.seed(42)
 
 
 def get_files(path):
@@ -156,6 +157,7 @@ def remove_padding(predictions_padded, targets_padded):
 def preprocess_dataset(cfg_preprocess):
 
     files, labels = get_files(cfg_preprocess['data_path'])
+    #print(len(files))
     #files, labels = get_files(cfg_preprocess)
     frames, action_segment_td, ground_truth_actions = read_data(files, labels, cfg_preprocess['frames_per_sec'])
     frames = standardise_features(append_labels_per_frame(frames, action_segment_td, ground_truth_actions))

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from torchmetrics import Accuracy
+from torchmetrics import Accuracy, ConfusionMatrix
 import random
 
 
@@ -21,13 +21,24 @@ class EncoderLSTM(nn.Module):
     def forward(self, x):
         batch_size = x.shape[0]
 
-        output, (h_n, c_n) = self.lstm(x)
+        h0, c0 = self._init_states(batch_size)
+        output, (h_n, c_n) = self.lstm(x, (h0,c0))
         # print(f"encoder hidden shape {h_n.shape}")
         # print(f"encoder cell shape {c_n.shape}")
         #
         # print(f"output shape {output.shape}")
         return h_n, c_n
 
+    def _init_states(self, batch_size):
+        if torch.cuda.is_available():
+            h0 = torch.zeros(self.n_layers, batch_size, self.hidden_size, requires_grad=True, device="cuda")
+            c0 = torch.zeros(self.n_layers, batch_size, self.hidden_size, requires_grad=True, device="cuda")
+
+        else:
+            h0 = torch.zeros(self.n_layers, batch_size, self.hidden_size, requires_grad=True)
+            c0 = torch.zeros(self.n_layers, batch_size, self.hidden_size, requires_grad=True)
+
+        return h0, c0
 
 class DecoderLSTM(torch.nn.Module):
     def __init__(self, hidden_size=100, n_classes=6):
@@ -54,7 +65,7 @@ class DecoderLSTM(torch.nn.Module):
         # print(f"decoder hidden input shape: {hidden.shape}")
         # print(f"decoder cell input shape : {cell.shape}")
         output, (hidden, cell) = self.lstm(x, (hidden, cell))
-        # output shape: (1,1,100)
+        # output shape: (1,1,100) #sequence_legth, batch_size,
 
         # print(f"decoder output shape: {output.shape}")
         # print(f"decoder hidden shape: {hidden.shape}")
@@ -78,6 +89,8 @@ class DecoderLSTM(torch.nn.Module):
 class EncoderDecoderLSTM(nn.Module):
     def __init__(self,n_features, hidden_size, n_layers):
         super().__init__()
+        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
         self.encoder = EncoderLSTM(n_features, hidden_size, n_layers)
         self.decoder = DecoderLSTM(hidden_size)
 
@@ -129,6 +142,7 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
     def __init__(self, n_features, hidden_size, n_layers):
         super().__init__()
 
+        #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.encoder_decoder_model = EncoderDecoderLSTM(n_features, hidden_size, n_layers)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.train_acc = Accuracy(ignore_index=-1)
@@ -137,6 +151,7 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
 
     def forward(self, X, y, teacher_forcing):
         logits = self.encoder_decoder_model(X, y, teacher_forcing)
+
         return logits
 
     def configure_optimizers(self):
@@ -181,19 +196,31 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
         self.log('test_PPL', test_perplexity, on_step=False, on_epoch=True, prog_bar=True)
+
         # return test_loss
 
 
-    def predict_step(self,batch, batch_idx):
-        X, y = batch
 
-        logits, _ = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
 
-        return logits, y
+    # def predict_step(self,batch, batch_idx):
+    #     X, y = batch
+    #
+    #     all_logits = []
+    #     predictions, _ = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+    #
+    #     return predictions, y
+    #
+    # def on_predict_epoch_end(self, outputs):
+    #     #[output1, output2, output3...]
+    #     return outputs
+
 
     def _get_preds_and_loss(self, X, y, teacher_forcing):
+        #X = X.type_as(X)
+        #y = y.type_as(y)
         logits = self(X, y, teacher_forcing)
-        logits = logits.squeeze(0)  # remove the batch dimension
+        logits = logits.squeeze(0) 
+        logits = logits.type_as(X)
         loss = self.loss_module(logits, y.squeeze(0))
 
         return logits, loss

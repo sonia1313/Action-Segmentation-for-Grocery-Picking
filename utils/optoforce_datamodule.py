@@ -3,12 +3,11 @@ import torch
 from pytorch_lightning.loops import FitLoop, Loop
 from torch import nn
 from torch.utils.data import DataLoader, random_split, Dataset, Subset
-from torchmetrics import Accuracy
+from torchmetrics import Accuracy, ConfusionMatrix
 import os.path as osp
 from torch.nn import functional as F
 from utils.optoforce_data_loader import OpToForceDataset
 from utils.preprocessing import *
-from utils.remove_padding_and_one_hot import _remove_padding, _remove_one_hot
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
@@ -85,7 +84,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
-        self.splits = [split for split in KFold(num_folds).split(range(len(self.train_dataset)))]
+        self.splits = [split for split in KFold(num_folds, shuffle=True, random_state=42).split(range(len(self.train_dataset)))]
 
     def setup_fold_index(self, fold_index: int) -> None:
         train_indices, val_indices = self.splits[fold_index]
@@ -102,8 +101,8 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)
 
-    def predict_dataloader(self) -> DataLoader:
-        return DataLoader(self.test_dataset)
+    # def predict_dataloader(self) -> DataLoader:
+    #     return DataLoader(self.test_dataset)
 
     def __post_init__(cls):
         super().__init__()
@@ -120,6 +119,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.n_features = n_features
         self.hidden_size = hidden_size
         self.n_layers = n_layers
+        #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.models = torch.nn.ModuleList(
             [model_cls.load_from_checkpoint(p, n_features=self.n_features,
@@ -127,10 +127,13 @@ class EnsembleVotingModel(pl.LightningModule):
                                             n_layers=self.n_layers) for p in checkpoint_paths])
         self.acc = Accuracy(ignore_index=-1)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
-
+        self.confusion_matrix = ConfusionMatrix(num_classes=6)
+        self.counter = 0
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
         X, y = batch
+        self.counter +=1
+
 
         # print(f"test_step_from ensemble: {X[0]}")
 
@@ -141,17 +144,28 @@ class EnsembleVotingModel(pl.LightningModule):
             logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
+        
+        logits = logits.type_as(X)
 
         loss = self.loss_module(logits, y.squeeze(0))
         self.acc(logits, y.squeeze(0))
 
         self.log("average_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("average test_acc", self.acc, on_step=False, on_epoch=True, prog_bar=True)
+        return {'loss':loss, 'preds':logits, 'target':y}
 
     def _get_preds(self, model, X, y, teacher_forcing=0.0):
         logits = model(X, y, teacher_forcing)
         logits = logits.squeeze(0)  # remove the batch dimension
         return logits
+
+    # def test_step_end(self,output_results):
+    #     print(output_results)
+    #     return output_results
+
+
+
+
 
 
 #############################################################################################
@@ -244,6 +258,7 @@ class KFoldLoop(Loop):
         self.trainer.strategy.connect(voting_model)
         self.trainer.strategy.model_to_device()
         self.trainer.test_loop.run()
+        print(voting_model.counter)
 
     def on_save_checkpoint(self) -> Dict[str, int]:
         return {"current_fold": self.current_fold}

@@ -1,9 +1,8 @@
 import yaml
 import os
-from utils.optoforce_data_loader import load_data
 import pytorch_lightning as pl
 import importlib.util
-
+import torch
 from utils.optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 from utils.preprocessing import preprocess_dataset
 import argparse
@@ -41,8 +40,14 @@ def _get_model(module_name, path, pl_class_name):
 def main(yaml_file):
     config = load_config(yaml_file)
     # model_pth = config['model']['script_path']
-
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     pl.seed_everything(config['seed'], workers=True)
+
+    n_gpu = 1 if torch.cuda.is_available() else 0
+
+    if n_gpu == 1:
+        device = torch.device("cuda:0")
+        print(torch.cuda.get_device_properties(device).name)
 
     model = _get_model(config['model']['module_name'], config['model']['script_path'], config['model']['pl_class_name'])
     # print(model)
@@ -54,14 +59,15 @@ def main(yaml_file):
 
     datamodule = OpToForceKFoldDataModule(X_data, y_data)
 
-    trainer = pl.Trainer(default_root_dir=config['train']['checkpoint_path'], gpus=config['train']['gpus'],
+    trainer = pl.Trainer(default_root_dir=config['train']['checkpoint_path'], gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
-                         limit_train_batches=2,
-                         limit_val_batches=2,
-                         limit_test_batches=2,
+                         # limit_train_batches=2,
+                         # limit_val_batches=2,
+                         # limit_test_batches=2,
                          num_sanity_val_steps=0,
-                         accelerator="auto"
+                         accelerator="auto",
+                         num_nodes=1
                          )
 
     internal_fit_loop = trainer.fit_loop
@@ -73,9 +79,11 @@ def main(yaml_file):
     trainer.fit_loop.connect(internal_fit_loop)
 
     trainer.fit(model, datamodule)
+    #
+    # predictions = trainer.predict(model, datamodule)
+    # torch.save(predictions, f'inference_results/encoder_decoder_lstm/{config["experiment_name"]}.npy')
 
-    predictions, targets = trainer.predict(model, datamodule)
-    #print(predictions)
+    # print(predictions)
 
 
 if __name__ == '__main__':
