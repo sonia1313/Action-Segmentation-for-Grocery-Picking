@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Type
 from pytorch_lightning.trainer.states import TrainerFn
 from sklearn.model_selection import KFold
 from models.encoder_decoder_lstm import LitEncoderDecoderLSTM
-
+import wandb
 PATH_TO_DIR = 'C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project'
 
 
@@ -113,7 +113,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 n_features: int, hidden_size: int, n_layers: int) -> None:
+                 n_features: int, hidden_size: int, n_layers: int, wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
         self.n_features = n_features
@@ -129,6 +129,8 @@ class EnsembleVotingModel(pl.LightningModule):
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
         self.counter = 0
+
+        self.wb_ensemble = wandb.init(project='Tactile_Action_Segmentation', group=wb_group_name, job_type='test')
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
         X, y = batch
@@ -148,10 +150,12 @@ class EnsembleVotingModel(pl.LightningModule):
         logits = logits.type_as(X)
 
         loss = self.loss_module(logits, y.squeeze(0))
-        self.acc(logits, y.squeeze(0))
+        accuracy = self.acc(logits, y.squeeze(0))
 
         self.log("average_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("average test_acc", self.acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("average test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+
+        self.wb_ensemble.log({"average_test_loss":loss, "average_test_accuracy": accuracy})
         return {'loss':loss, 'preds':logits, 'target':y}
 
     def _get_preds(self, model, X, y, teacher_forcing=0.0):
@@ -196,7 +200,7 @@ class EnsembleVotingModel(pl.LightningModule):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int) -> None:
+    def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int, wb_cfg) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
@@ -205,6 +209,7 @@ class KFoldLoop(Loop):
         self.n_features = n_features
         self.hidden_size = hidden_size
         self.n_layers = n_layers
+        self.wb_cfg = wb_cfg
 
     @property
     def done(self) -> bool:
@@ -222,15 +227,20 @@ class KFoldLoop(Loop):
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
         self.trainer.datamodule.setup_folds(self.num_folds)
         self.lightning_module_state_dict = deepcopy(self.trainer.lightning_module.state_dict())
-
     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
         print(f"STARTING FOLD {self.current_fold}")
+        self.wb_run = wandb.init(reinit=True, project='Tactile_Action_Segmentation', group=self.wb_cfg['kfold']['group'], job_type=self.wb_cfg['kfold']['job_type'], id=f'current_fold_{self.current_fold}')
+
+        self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
+
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
         self.trainer.datamodule.setup_fold_index(self.current_fold)
 
     def advance(self, *args: Any, **kwargs: Any) -> None:
         """Used to the run a fitting and testing on the current hold."""
+        #pass experiment tracking object
+        #self.trainer.lightning_module.training_step(wbj_obj = self.wb_run)
         self._reset_fitting()  # requires to reset the tracking stage.
         self.fit_loop.run()
 
@@ -241,10 +251,13 @@ class KFoldLoop(Loop):
     def on_advance_end(self) -> None:
         """Used to save the weights of the current fold and reset the LightningModule and its optimizers."""
         self.trainer.save_checkpoint(osp.join(self.export_path, f"model.{self.current_fold}.pt"))
+        self.wb_run.finish()
         # restore the original weights + optimizers and schedulers.
         self.trainer.lightning_module.load_state_dict(self.lightning_module_state_dict)
         self.trainer.strategy.setup_optimizers(self.trainer)
+
         self.replace(fit_loop=FitLoop)
+
 
     def on_run_end(self) -> None:
         """Used to compute the performance of the ensemble model on the test set."""
@@ -252,13 +265,13 @@ class KFoldLoop(Loop):
         voting_model = EnsembleVotingModel(type(self.trainer.lightning_module), checkpoint_paths
                                            , n_features=self.n_features,
                                            hidden_size=self.hidden_size,
-                                           n_layers=self.n_layers)
+                                           n_layers=self.n_layers, wb_group_name = self.wb_cfg['ensemble']['group'])
         voting_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
         self.trainer.strategy.connect(voting_model)
         self.trainer.strategy.model_to_device()
         self.trainer.test_loop.run()
-        print(voting_model.counter)
+        #print(voting_model.counter)
 
     def on_save_checkpoint(self) -> Dict[str, int]:
         return {"current_fold": self.current_fold}

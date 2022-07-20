@@ -2,7 +2,6 @@ experiment_name: Encoder_Decoder_LSTM
 main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
 
 seed: 42
-device: ['cpu', 'cuda']
 
 dataset:
   preprocess:
@@ -25,11 +24,20 @@ model:
 train:
   checkpoint_path: train/encoder_decoder_lstm/lightning_logs/checkpoints
   batch_size: 1
-  epochs: 20 #25
+  epochs: 20 #5 #20 #25
   kfold_path: cross-validation/encoder_decoder_kfold
   n_kfolds: 5
-test:
-  checkpoint_path: train/lightning_logs/checkpoints
+
+wb:
+  kfold:
+    project: Tactile_Action_Segmentation
+    group: experiment_4
+    job_type: cross-val
+  ensemble:
+    project: Tactile_Action_Segmentation
+    group: experiment_4
+    job_type: test
+
 
 
 

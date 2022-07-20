@@ -31,7 +31,7 @@ from models.baseline_lstm_1_layer import LitManyToManyLSTM
 
 #
 def main():
-    #wandb.login(key = '988ddf488504dc321726c508809702806f2655ef' )
+    wandb.login(key = '988ddf488504dc321726c508809702806f2655ef' )
     COLAB_GPU = 'COLAB_GPU' in os.environ
     PATH_TO_DIR = 'C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project'
     n_gpu = 0
@@ -61,7 +61,7 @@ def main():
 
     trainer.test(dataloaders=test_loader)
 
-    #wandb.finish()
+    wandb.finish()
 
 
 # def main():

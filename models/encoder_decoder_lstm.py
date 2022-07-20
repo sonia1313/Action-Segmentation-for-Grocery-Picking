@@ -3,6 +3,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from torchmetrics import Accuracy, ConfusionMatrix
 import random
+import wandb
 
 
 class EncoderLSTM(nn.Module):
@@ -22,7 +23,7 @@ class EncoderLSTM(nn.Module):
         batch_size = x.shape[0]
 
         h0, c0 = self._init_states(batch_size)
-        output, (h_n, c_n) = self.lstm(x, (h0,c0))
+        output, (h_n, c_n) = self.lstm(x, (h0, c0))
         # print(f"encoder hidden shape {h_n.shape}")
         # print(f"encoder cell shape {c_n.shape}")
         #
@@ -39,6 +40,7 @@ class EncoderLSTM(nn.Module):
             c0 = torch.zeros(self.n_layers, batch_size, self.hidden_size, requires_grad=True)
 
         return h0, c0
+
 
 class DecoderLSTM(torch.nn.Module):
     def __init__(self, hidden_size=100, n_classes=6):
@@ -87,7 +89,7 @@ class DecoderLSTM(torch.nn.Module):
 # decoder uses context vector to predict h0, h1, h2...hn
 # decoder can also use teacher forcing [h0,y0],[h1,y1],[h2,y2]
 class EncoderDecoderLSTM(nn.Module):
-    def __init__(self,n_features, hidden_size, n_layers):
+    def __init__(self, n_features, hidden_size, n_layers):
         super().__init__()
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -142,7 +144,7 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
     def __init__(self, n_features, hidden_size, n_layers):
         super().__init__()
 
-        #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cuda:0" if torch.cu da.is_available() else "cpu")
         self.encoder_decoder_model = EncoderDecoderLSTM(n_features, hidden_size, n_layers)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.train_acc = Accuracy(ignore_index=-1)
@@ -164,10 +166,14 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
         logits, loss = self._get_preds_and_loss(X, y, teacher_forcing=0.5)
         train_perplexity = torch.exp(loss)
         # logits shape : (n_timesteps, n_classes)
-        self.train_acc(logits, y.squeeze(0))  # remove batch dimension
+        accuracy = self.train_acc(logits, y.squeeze(0))  # remove batch dimension
         self.log('train_loss', loss, on_step=False, on_epoch=True)
-        self.log('train_acc', self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('train_PPL', train_perplexity, on_step=False, on_epoch=True, prog_bar=True)
+
+        self.log('train_acc', accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        # self.log('train_PPL', train_perplexity, on_step=False, on_epoch=True, prog_bar=True)
+
+        wandb.log({"epoch": self.current_epoch,"train_loss": loss, "train_accuracy": accuracy})
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -175,14 +181,16 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
 
         logits, val_loss = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
 
-        val_perplexity = torch.exp(val_loss)
-        self.val_acc(logits, y.squeeze(0))
+        # val_perplexity = torch.exp(val_loss)
+        accuracy = self.val_acc(logits, y.squeeze(0))
 
         self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_acc', self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_acc', accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.log('val_PPL', val_perplexity, on_step=False, on_epoch=True, prog_bar=True)
+        # self.log('val_PPL', val_perplexity, on_step=False, on_epoch=True, prog_bar=True)
         # return val_loss
+
+        wandb.log({"epoch": self.current_epoch, "val_loss": val_loss, "val_accuracy": accuracy})
 
     def test_step(self, batch, batch_idx):
         X, y = batch
@@ -190,17 +198,14 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
 
         logits, test_loss = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
 
-        test_perplexity = torch.exp(test_loss)
-        self.test_acc(logits, y.squeeze(0))  # remove the batch dimension
+        # test_perplexity = torch.exp(test_loss)
+        accuracy = self.test_acc(logits, y.squeeze(0))  # remove the batch dimension
 
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('test_PPL', test_perplexity, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        # self.log('test_PPL', test_perplexity, on_step=False, on_epoch=True, prog_bar=True)
 
         # return test_loss
-
-
-
 
     # def predict_step(self,batch, batch_idx):
     #     X, y = batch
@@ -214,19 +219,15 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
     #     #[output1, output2, output3...]
     #     return outputs
 
-
     def _get_preds_and_loss(self, X, y, teacher_forcing):
-        #X = X.type_as(X)
-        #y = y.type_as(y)
+        # X = X.type_as(X)
+        # y = y.type_as(y)
         logits = self(X, y, teacher_forcing)
-        logits = logits.squeeze(0) 
+        logits = logits.squeeze(0)
         logits = logits.type_as(X)
         loss = self.loss_module(logits, y.squeeze(0))
 
         return logits, loss
-
-
-
 
 # TODO: Implement attention mechanism
 # class AttentionDecoder():

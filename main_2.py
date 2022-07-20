@@ -5,6 +5,8 @@ import importlib.util
 import torch
 from utils.optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 from utils.preprocessing import preprocess_dataset
+import wandb
+from pytorch_lightning.loggers import WandbLogger
 import argparse
 
 CONFIG_PATH = "config"  # path from root folder
@@ -41,6 +43,7 @@ def main(yaml_file):
     config = load_config(yaml_file)
     # model_pth = config['model']['script_path']
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     pl.seed_everything(config['seed'], workers=True)
 
     n_gpu = 1 if torch.cuda.is_available() else 0
@@ -58,7 +61,8 @@ def main(yaml_file):
     X_data, y_data, _ = preprocess_dataset(config['dataset']['preprocess'])
 
     datamodule = OpToForceKFoldDataModule(X_data, y_data)
-
+    #logger = WandbLogger(project=config['wb']['project'], log_model=True,
+                         #save_dir=config['wb']['save_dir'])
     trainer = pl.Trainer(default_root_dir=config['train']['checkpoint_path'], gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
@@ -67,14 +71,15 @@ def main(yaml_file):
                          # limit_test_batches=2,
                          num_sanity_val_steps=0,
                          accelerator="auto",
-                         num_nodes=1
-                         )
+                         num_nodes=1,
+
+                         )  # logger = logger
 
     internal_fit_loop = trainer.fit_loop
     trainer.fit_loop = KFoldLoop(config['train']['n_kfolds'], export_path=config['train']['kfold_path'],
                                  n_features=config['model']['n_features'],
                                  hidden_size=config['model']['n_hidden_units'],
-                                 n_layers=config['model']['n_layers']
+                                 n_layers=config['model']['n_layers'], wb_cfg=config['wb']
                                  )
     trainer.fit_loop.connect(internal_fit_loop)
 
@@ -84,6 +89,8 @@ def main(yaml_file):
     # torch.save(predictions, f'inference_results/encoder_decoder_lstm/{config["experiment_name"]}.npy')
 
     # print(predictions)
+    # wandb.sklearn.plot
+    # wandb.finish()
 
 
 if __name__ == '__main__':
