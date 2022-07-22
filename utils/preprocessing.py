@@ -11,36 +11,49 @@ import numpy as np
 #
 # PATH_TO_DIR = os.chdir("/content/drive/Othercomputers/Dell")
 import torch
+
 np.random.seed(42)
 
 
-def get_files(path):
-    #files = glob.glob(f"{path}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
-    #labels = glob.glob(f"{path}/dataset/*/clutter/[0-9]*/labels")
-    files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
-    labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
+def get_files(path, clutter=True, single=False):
+    # files = glob.glob(f"{path}/dataset/*/clutter/[0-9]*/optoforce_data.csv")
+    # labels = glob.glob(f"{path}/dataset/*/clutter/[0-9]*/labels")
+    # files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
+    # labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
+
+    if clutter and single == False:
+        files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
+        labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
+    elif single and clutter == False:
+        files = glob.glob(f"{path}/*/single/[0-9]*/optoforce_data.csv")
+        labels = glob.glob(f"{path}/*/single/[0-9]*/labels")
+    else:
+        files = glob.glob(f"{path}/*/*/[0-9]*/optoforce_data.csv")
+        labels = glob.glob(f"{path}/*/*/[0-9]*/labels")
+
     return files, labels
 
 
-def read_data(files, labels, fps=1):
+def read_data(files, labels, fps, feature_engineering):
     """ 840 frames is approx 1FPS"""
-    #840
     nth_frame = 840 // fps
     frames = []
     for file in files:
         fruit_and_env = re.findall('avocado|banana|blueberry|clutter|single', file)
         data_df = pd.read_csv(file)
-        # data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
+        data_df = data_df.iloc[::nth_frame, :]
+        if feature_engineering:
+            data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
+            data_df['middle'] = np.linalg.norm(data_df[['middle_x', 'middle_y', 'middle_z']].values, axis=1)
+            data_df['thumb'] = np.linalg.norm(data_df[['thumb_x', 'thumb_y', 'thumb_z']].values, axis=1)
 
-        data_df = data_df.iloc[::nth_frame, :]  #
-        data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
-        data_df['middle'] = np.linalg.norm(data_df[['middle_x', 'middle_y', 'middle_z']].values, axis=1)
-        data_df['thumb'] = np.linalg.norm(data_df[['thumb_x', 'thumb_y', 'thumb_z']].values, axis=1)
+            data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z',
+                                            'index_x', 'index_y', 'index_z',
+                                            'middle_x', 'middle_y', 'middle_z',
+                                            'thumb_x', 'thumb_y', 'thumb_z'])
+        else:
+            data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
 
-        data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z',
-                                        'index_x', 'index_y', 'index_z',
-                                        'middle_x', 'middle_y', 'middle_z',
-                                        'thumb_x', 'thumb_y', 'thumb_z'])
         data_df["fruit"] = fruit_and_env[0]
         data_df["environment"] = fruit_and_env[1]
         data_df["label"] = ""
@@ -60,7 +73,8 @@ def read_data(files, labels, fps=1):
             action_segment_td.append(td_per_file)
             ground_truth_actions.append(gt_actions_per_file)
 
-    return frames, action_segment_td, ground_truth_actions
+    features = [c for c in frames[0].columns if c not in ('time', 'environment', 'fruit', 'label')]
+    return frames, action_segment_td, ground_truth_actions, features
 
 
 def append_labels_per_frame(frames, action_segment_td, ground_truth_actions):
@@ -71,13 +85,13 @@ def append_labels_per_frame(frames, action_segment_td, ground_truth_actions):
             condition.append(df['time'].between(int(start_time), int(end_time)))
 
         df['label'] = np.select(condition, labels, default=None)
-        df.dropna(inplace=True)
+        df.dropna(inplace=True)  # remove unlabelled samples
 
     return frames
 
 
 def standardise_features(frames,
-                         features=['index', 'middle', 'thumb']):
+                         features):  # index
     for frame in frames:
         for feature in frame[features]:
             mean = frame[feature].mean()
@@ -88,6 +102,17 @@ def standardise_features(frames,
     return frames
 
 
+def normalize_features(frames, features):
+    """min-max scaling """
+    for frame in frames:
+        for feature in frame[features]:
+            min_val = frame[feature].min()
+            max_val = frame[feature].max()
+
+            frame[feature] = (frame[feature] - min_val) / (max_val - min_val)
+
+    return frame
+
 def encode_labels(frames):
     # unique_actions = set()
 
@@ -96,8 +121,8 @@ def encode_labels(frames):
     #     for label in frame['label']:
     #         unique_actions.add(label)
     # print(unique_actions)
-    #one_hot_encoding_acts = pd.get_dummies(list(unique_actions))
-    #label_to_index_map = {k: np.argmax(v) for k, v in one_hot_encoding_acts.items()}
+    # one_hot_encoding_acts = pd.get_dummies(list(unique_actions))
+    # label_to_index_map = {k: np.argmax(v) for k, v in one_hot_encoding_acts.items()}
     # print(label_to_index_map)
     actions_per_seq = []
     for frame in frames:
@@ -110,8 +135,11 @@ def encode_labels(frames):
     return actions_per_seq, label_to_index_map
 
 
-def pad_data(frames, actions_per_seq, n_features=3, n_classes=6, n_sequences=30):
-    features = ['index', 'middle', 'thumb']
+def pad_data(frames, actions_per_seq, features, n_sequences):
+    if len(features) == 0:
+        print("feature list is empty")
+    n_features = len(features)
+
     max_length = max([len(frame) for frame in frames])
     numeric_features_per_seq = [np.array(frames[i][features]) for i in range(len(frames))]
 
@@ -135,11 +163,19 @@ def pad_data(frames, actions_per_seq, n_features=3, n_classes=6, n_sequences=30)
     return torch.FloatTensor(padded_numeric_features_per_seq), torch.LongTensor(padded_labels_per_seq)
 
 
+def convert_to_tensor(frames, actions_per_seq, features):
+    numeric_features_per_seq = [np.array(frames[i][features]) for i in range(len(frames))]
+
+    labels_per_seq = [np.array(actions_per_seq[i]) for i in range(len(actions_per_seq))]
+
+    return torch.FloatTensor(numeric_features_per_seq), torch.LongTensor(labels_per_seq)
+
+
 def remove_padding(predictions_padded, targets_padded):
-    print(f"shape of padded targets {targets_padded.shape}")
+    # print(f"shape of padded targets {targets_padded.shape}")
     mask = (targets_padded >= 0).long()  # only outputs labels that is >= 0
     # print(mask)
-    print(f"shape of mask {mask.shape}")
+    # print(f"shape of mask {mask.shape}")
 
     n = len([out for out in mask.squeeze() if out.all() >= 1])
     # print(n)
@@ -151,19 +187,28 @@ def remove_padding(predictions_padded, targets_padded):
     # print(f"unpadded targets {targets.shape}")
     # _, targets = targets.max(dim=1)  # remove one hot encoding
 
-    return outputs.unsqueeze(0), targets.unsqueeze(0)
+    return outputs, targets
 
 
 def preprocess_dataset(cfg_preprocess):
-
     files, labels = get_files(cfg_preprocess['data_path'])
-    #print(len(files))
-    #files, labels = get_files(cfg_preprocess)
-    frames, action_segment_td, ground_truth_actions = read_data(files, labels, cfg_preprocess['frames_per_sec'])
-    frames = standardise_features(append_labels_per_frame(frames, action_segment_td, ground_truth_actions))
+    frames, action_segment_td, ground_truth_actions, features = read_data(files, labels,
+                                                                          cfg_preprocess['frames_per_sec'],
+                                                                          cfg_preprocess['feature_engineering'])
+
+    frames = append_labels_per_frame(frames, action_segment_td, ground_truth_actions)
+    if cfg_preprocess['standardise_data']:
+        frames = standardise_features(frames, features)
+    if cfg_preprocess['normalize_data']:
+        frames = normalize_features(frames, features)
+
     actions_per_seq, label_to_index_map = encode_labels(frames)
-    X_data, y_data = pad_data(frames, actions_per_seq, n_features=cfg_preprocess['n_features'],
-                              n_sequences=cfg_preprocess['n_sequences'],
-                              )
+
+    if cfg_preprocess['pad_data']:
+
+        X_data, y_data = pad_data(frames, actions_per_seq,
+                                  n_sequences=len(files), features=features)
+    else:
+        X_data, y_data = convert_to_tensor(frames, actions_per_seq, features=features)
 
     return X_data, y_data, label_to_index_map
