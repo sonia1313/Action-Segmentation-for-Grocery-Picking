@@ -43,7 +43,7 @@ def read_data(files, labels, fps, feature_engineering):
         data_df = pd.read_csv(file)
         data_df = data_df.iloc[::nth_frame, :]
         if feature_engineering:
-            data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
+            #data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
             data_df['middle'] = np.linalg.norm(data_df[['middle_x', 'middle_y', 'middle_z']].values, axis=1)
             data_df['thumb'] = np.linalg.norm(data_df[['thumb_x', 'thumb_y', 'thumb_z']].values, axis=1)
 
@@ -52,7 +52,7 @@ def read_data(files, labels, fps, feature_engineering):
                                             'middle_x', 'middle_y', 'middle_z',
                                             'thumb_x', 'thumb_y', 'thumb_z'])
         else:
-            data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
+            data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z','index_x', 'index_y', 'index_z'])
 
         data_df["fruit"] = fruit_and_env[0]
         data_df["environment"] = fruit_and_env[1]
@@ -111,7 +111,7 @@ def normalize_features(frames, features):
 
             frame[feature] = (frame[feature] - min_val) / (max_val - min_val)
 
-    return frame
+    return frames
 
 def encode_labels(frames):
     # unique_actions = set()
@@ -172,19 +172,19 @@ def convert_to_tensor(frames, actions_per_seq, features):
 
 
 def remove_padding(predictions_padded, targets_padded):
-    # print(f"shape of padded targets {targets_padded.shape}")
+    #print(f"shape of padded targets {targets_padded.shape}")
     mask = (targets_padded >= 0).long()  # only outputs labels that is >= 0
-    # print(mask)
-    # print(f"shape of mask {mask.shape}")
+    #print(mask)
+    #print(f"shape of mask {mask.shape}")
 
     n = len([out for out in mask.squeeze() if out.all() >= 1])
-    # print(n)
-    outputs = predictions_padded.squeeze()[:n, :]
-    # print(f"unpadded outputs {outputs.shape}")
+    #print(n)
+    outputs = predictions_padded.squeeze()[:n, :] #(unpadded_seq_len-1,6) e.g ([120,6])
+    #print(f"unpadded outputs {outputs.shape}")
 
     targets_padded = targets_padded.squeeze()
     targets = targets_padded[:n]
-    # print(f"unpadded targets {targets.shape}")
+    #print(f"unpadded targets {targets.shape}") #([unpadded_seq_len-1]) e.g ([120])
     # _, targets = targets.max(dim=1)  # remove one hot encoding
 
     return outputs, targets
@@ -197,11 +197,13 @@ def preprocess_dataset(cfg_preprocess):
                                                                           cfg_preprocess['feature_engineering'])
 
     frames = append_labels_per_frame(frames, action_segment_td, ground_truth_actions)
+    #print(len(frames))
     if cfg_preprocess['standardise_data']:
         frames = standardise_features(frames, features)
     if cfg_preprocess['normalize_data']:
         frames = normalize_features(frames, features)
 
+    #print(len(frames))
     actions_per_seq, label_to_index_map = encode_labels(frames)
 
     if cfg_preprocess['pad_data']:

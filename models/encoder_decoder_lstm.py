@@ -1,15 +1,20 @@
+import pandas as pd
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from matplotlib import pyplot as plt
 from torchmetrics import Accuracy, ConfusionMatrix
 import random
 import wandb
+import seaborn as sns
+from utils.plot_confusion_matrix import _plot_cm
+from utils.preprocessing import remove_padding
 
 
 class EncoderLSTM(nn.Module):
     """ Encodes tactile time series data """
 
-    def __init__(self, n_features=3, hidden_size=100, n_layers=1, n_classes=6):
+    def __init__(self, n_features=6, hidden_size=100, n_layers=1, n_classes=6):
         super().__init__()
         self.n_features = n_features
         self.hidden_size = hidden_size
@@ -18,6 +23,7 @@ class EncoderLSTM(nn.Module):
 
         self.lstm = nn.LSTM(input_size=self.n_features, hidden_size=self.hidden_size,
                             num_layers=self.n_layers, batch_first=True)
+
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -57,17 +63,19 @@ class DecoderLSTM(torch.nn.Module):
         x - is the target ouput
 
         """
-        # x = x.unsqueeze(0)
+        #x = x.unsqueeze(0)
         # print("adding extra dimension in decoder input")
-        # x = torch.LongTensor(x.view(1,1,1))
         #
-        # print(f"decoder input shape: {x.shape}")
-        # lstm input size: (seq_len, batch,n_features) = (1,1,1)
+        # print(x)
+        #x = torch.LongTensor(x.view(1,1,1))
+
+        #print(f"decoder input shape: {x.shape}")
+        #lstm input size: (seq_len, batch,n_features) = (1,1,1)
         # print(f"decoder input: {x}")
         # print(f"decoder hidden input shape: {hidden.shape}")
         # print(f"decoder cell input shape : {cell.shape}")
         output, (hidden, cell) = self.lstm(x, (hidden, cell))
-        # output shape: (1,1,100) #sequence_legth, batch_size,
+        # output shape: (1,1,100) #sequence_legth, batch_size, hidden
 
         # print(f"decoder output shape: {output.shape}")
         # print(f"decoder hidden shape: {hidden.shape}")
@@ -75,12 +83,12 @@ class DecoderLSTM(torch.nn.Module):
 
         flatten_output = output.view(-1, output.shape[2])
 
-        # print(f"flatten output shape:  {flatten_output.shape} ")
+        #print(f"flatten output shape:  {flatten_output.shape} ")
         # flatten_output shape: (1, 100)
         logits = self.linear(flatten_output)
         # shape of logits: (1,6)
 
-        # print(f"logits shape:{logits.shape}")
+        #print(f"logits shape:{logits.shape}")
 
         return logits, hidden, cell
 
@@ -92,7 +100,7 @@ class EncoderDecoderLSTM(nn.Module):
     def __init__(self, n_features, hidden_size, n_layers):
         super().__init__()
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+        #assert n_features == 6
         self.encoder = EncoderLSTM(n_features, hidden_size, n_layers)
         self.decoder = DecoderLSTM(hidden_size)
 
@@ -107,23 +115,27 @@ class EncoderDecoderLSTM(nn.Module):
         hidden, cell = self.encoder(x)
         # print("context vector shape")
         # print(hidden.shape)
-        # decoder_input = torch.zeros((1,1,1)) #not sure
         # print("beginning decoder input")
         # print(decoder_input.shape)
         decoder_input = y[0][0]
+        # print("first label to decoder input")
+        # print(decoder_input) #takes the first label as input
         decoder_input = decoder_input.type(torch.float32)
         decoder_input = decoder_input.view(1, 1, 1)
         for t in range(1, optoforce_seq_len):
             # print(t)
+
+            # print(f"current t {t}")
             # print(f"decoder input shape at time {t} = {decoder_input.shape}")
             # print(f"h_x.shape {hidden.shape}")
             # print(f"cell.shape {cell.shape}")
-            # print(f"current t {t}")
+            #decoder_input (1,1,1) bactch_size,seq,len,input
             output, hidden, cell = self.decoder(decoder_input, hidden, cell)
+
             # output shape (1,6)
 
             # print(f"output predicted at time {t} = {output}")
-            outputs[0][t - 1] = output
+            outputs[0][t] = output #instead of t -1
 
             teacher_force = random.random() < teacher_forcing_ratio
             # print(f"teacher forcing present at time {t} = {teacher_force}")
@@ -141,7 +153,7 @@ class EncoderDecoderLSTM(nn.Module):
 
 
 class LitEncoderDecoderLSTM(pl.LightningModule):
-    def __init__(self, n_features, hidden_size, n_layers):
+    def __init__(self, n_features, hidden_size, n_layers, experiment_tracking):
         super().__init__()
 
         # device = torch.device("cuda:0" if torch.cu da.is_available() else "cpu")
@@ -151,28 +163,52 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
         self.val_acc = Accuracy(ignore_index=-1)
         self.test_acc = Accuracy(ignore_index=-1)
 
+
+
+
+        self.experiment_tracking = experiment_tracking
+        #self.apply(self._init_weights)
+        self.test_counter = 0
+
+        self.confusion_matrix = ConfusionMatrix(num_classes=6)
+        self.exp_name = 'checked_4_1_fps_2_features'
+
+    def _init_weights(self, module):
+
+        for name, param in module.named_parameters():
+            nn.init.uniform_(param.data, -0.08, 0.08)
+
     def forward(self, X, y, teacher_forcing):
         logits = self.encoder_decoder_model(X, y, teacher_forcing)
 
         return logits
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters())
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
         return optimizer
 
     def training_step(self, batch, batch_idx):
         X, y = batch
-
+        #print(X.shape)
+        #print(y.shape)
+        self.test_counter += 1
         logits, loss = self._get_preds_and_loss(X, y, teacher_forcing=0.5)
-        train_perplexity = torch.exp(loss)
-        # logits shape : (n_timesteps, n_classes)
-        accuracy = self.train_acc(logits, y.squeeze(0))  # remove batch dimension
+        y = y[0][1:].view(-1) #shape = [max_seq_len-1]
+        accuracy = self.train_acc(logits, y)
         self.log('train_loss', loss, on_step=False, on_epoch=True)
 
         self.log('train_acc', accuracy, on_step=False, on_epoch=True, prog_bar=True)
         # self.log('train_PPL', train_perplexity, on_step=False, on_epoch=True, prog_bar=True)
 
-        wandb.log({"epoch": self.current_epoch,"train_loss": loss, "train_accuracy": accuracy})
+        if self.experiment_tracking:
+            wandb.log({"epoch": self.current_epoch, "train_loss": loss, "train_accuracy": accuracy})
+
+        preds, targets = remove_padding(logits, y)
+
+
+        cm = self.confusion_matrix(preds, targets)
+
+        _ = _plot_cm(cm=cm, path=f"training_confusion_matrix/{self.exp_name}_{self.test_counter}.png")
 
         return loss
 
@@ -180,52 +216,85 @@ class LitEncoderDecoderLSTM(pl.LightningModule):
         X, y = batch
 
         logits, val_loss = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+        y = y[0][1:].view(-1) #shape = [max_seq_len-1]
 
-        # val_perplexity = torch.exp(val_loss)
         accuracy = self.val_acc(logits, y.squeeze(0))
 
         self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_acc', accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
-        # self.log('val_PPL', val_perplexity, on_step=False, on_epoch=True, prog_bar=True)
-        # return val_loss
 
-        wandb.log({"epoch": self.current_epoch, "val_loss": val_loss, "val_accuracy": accuracy})
+        preds, targets = remove_padding(logits, y)
+        cm = self.confusion_matrix(preds, targets)
+
+        _ = _plot_cm(cm, path=f"training_confusion_matrix/{self.exp_name}_val.png")
+        if self.experiment_tracking:
+            wandb.log({"epoch": self.current_epoch, "val_loss": val_loss, "val_accuracy": accuracy})
 
     def test_step(self, batch, batch_idx):
         X, y = batch
         # print(X[0][0])
 
         logits, test_loss = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+        y = y[0][1:].view(-1) #shape = [max_seq_len-1]
 
-        # test_perplexity = torch.exp(test_loss)
         accuracy = self.test_acc(logits, y.squeeze(0))  # remove the batch dimension
 
-        self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
-        # self.log('test_PPL', test_perplexity, on_step=False, on_epoch=True, prog_bar=True)
-
-        # return test_loss
-
-    # def predict_step(self,batch, batch_idx):
+    # def validation_step(self, batch, batch_idx):
     #     X, y = batch
     #
-    #     all_logits = []
-    #     predictions, _ = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+    #     logits, val_loss = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+    #     y = y[0][1:].view(-1) #shape = [max_seq_len-1]
     #
-    #     return predictions, y
+    #     accuracy = self.val_acc(logits, y.squeeze(0))
     #
-    # def on_predict_epoch_end(self, outputs):
-    #     #[output1, output2, output3...]
-    #     return outputs
+    #     self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
+    #     self.log('val_acc', accuracy, on_step=False, on_epoch=True, prog_bar=True)
+    #
+    #
+    #     preds, targets = remove_padding(logits, y)
+    #     cm = self.confusion_matrix(preds, targets)
+    #
+    #     _ = _plot_cm(cm, path=f"training_confusion_matrix/{self.exp_name}_val.png")
+    #     if self.experiment_tracking:
+    #         wandb.log({"epoch": self.current_epoch, "val_loss": val_loss, "val_accuracy": accuracy})
+    #
+    # def test_step(self, batch, batch_idx):
+    #     X, y = batch
+    #     # print(X[0][0])
+    #
+    #     logits, test_loss = self._get_preds_and_loss(X, y, teacher_forcing=0.0)
+    #     y = y[0][1:].view(-1) #shape = [max_seq_len-1]
+    #
+    #     accuracy = self.test_acc(logits, y.squeeze(0))  # remove the batch dimension
+    #
+    #     self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
+    #     self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+    #
+    #     preds, targets = remove_padding(logits, y)
+    #     cm = self.confusion_matrix(preds, targets)
+    #
+    #     _ = _plot_cm(cm, path=f"training_confusion_matrix/{self.exp_name}_test.png")
+
+
 
     def _get_preds_and_loss(self, X, y, teacher_forcing):
         # X = X.type_as(X)
         # y = y.type_as(y)
         logits = self(X, y, teacher_forcing)
-        logits = logits.squeeze(0)
+
+        #logits: batch_size,max_seqlen-1,n_classes e.g.[1,194,6]
+        #y: batch_size,max_seqlen-1 e.g. [1,194]
+        logits_dim = logits.shape[-1]
+
+        logits = logits[0][1:].view(-1,logits_dim)
+        y = y[0][1:].view(-1)
+        #logits: max_seqlen-1,n_classes e.g.[193,6]
+        #y: max_seqlen-1 e.g. [193]
+
         logits = logits.type_as(X)
-        loss = self.loss_module(logits, y.squeeze(0))
+
+        loss = self.loss_module(logits, y)
 
         return logits, loss
 

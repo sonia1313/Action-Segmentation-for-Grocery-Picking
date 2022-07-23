@@ -8,10 +8,10 @@ dataset:
     data_path: dataset #get_files()
     clutter: True #get_files()
     single: False #get_files()
-    frames_per_sec: 30 #15 #30 #84 #15 #1 #15 #84 #read_data()
-    feature_engineering: True #read_data()
-    standardise_data: True #preprocess_dataset()
-    normalize_data: False #preprocess_dataset()
+    frames_per_sec: 1 #15  #read_data()
+    feature_engineering: True #True #read_data()
+    standardise_data: False #preprocess_dataset()
+    normalize_data: True #preprocess_dataset()
     pad_data: True #preprocess_dataset()
 
 
@@ -21,27 +21,14 @@ model:
   script_path: models/encoder_decoder_lstm.py
   #set n_features according to preprocess dataset conditions
     #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
-  n_features: 3
+  n_features: 2 #3
   n_layers: 1
-  n_hidden_units: 100
+  n_hidden_units: 250 #100 #250
 
 train:
   checkpoint_path: train/encoder_decoder_lstm/lightning_logs/checkpoints
   batch_size: 1
-  epochs: 20 #3 #20 #20 #5 #20 #25
-  kfold_path: cross-validation/encoder_decoder_kfold
-  n_kfolds: 5
-
-# the author uses wieghts and biases for experiment tracking
-wb:
-  kfold:
-    project: Tactile_Action_Segmentation
-    group: e_d_15_fps_exp1_f2
-    job_type: cross-val
-  ensemble:
-    project: Tactile_Action_Segmentation
-    group: e_d_15_fps_exp1_f2
-    job_type: test
+  epochs: 20 #20 #50 #3 #20 #20 #5 #20 #25
 
 
 
