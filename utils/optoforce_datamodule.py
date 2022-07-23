@@ -163,12 +163,12 @@ class EnsembleVotingModel(pl.LightningModule):
         preds, targets = remove_padding(logits, y)
 
         cm = self.confusion_matrix(preds, targets)
-        self._plot_cm(cm)
+        cm_fig = self._plot_cm(cm)
 
         self.log("average_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("average test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.wb_ensemble.log({"average_test_loss": loss, "average_test_accuracy": accuracy})
+        self.wb_ensemble.log({"average_test_loss": loss, "average_test_accuracy": accuracy, "confusion_matrix":cm_fig})
         return {'loss': loss, 'preds': logits, 'target': y}
 
     def _get_preds(self, model, X, y, teacher_forcing=0.0):
@@ -186,14 +186,16 @@ class EnsembleVotingModel(pl.LightningModule):
         y = x = ['move-in', 'manipulate', 'grasp', 'pick-up', 'move-out', 'drop']
 
         plt.figure(figsize=(10, 10))
-        df_cm = pd.DataFrame(cm.numpy(), index=range(6), columns=range(6))
+        df_cm = pd.DataFrame(cm.cpu().numpy(), index=range(6), columns=range(6))
         sns.set_theme()
 
         cm_fig = sns.heatmap(df_cm, annot=True, xticklabels=x, yticklabels=y, cbar_kws=None).get_figure()
 
-        cm_fig.savefig(f"confusion_matrix_figs/{self.experiment_name}_cm.png", dpi=cm_fig.dpi)
+        cm_fig.savefig(f"confusion_matrix_figs/{self.experiment_name}_cm_{self.counter}.png", dpi=cm_fig.dpi)
 
         plt.close(cm_fig)
+
+        return cm_fig
 
 
 #############################################################################################
