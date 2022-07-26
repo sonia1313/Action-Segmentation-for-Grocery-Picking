@@ -43,7 +43,7 @@ def read_data(files, labels, fps, feature_engineering):
         data_df = pd.read_csv(file)
         data_df = data_df.iloc[::nth_frame, :]
         if feature_engineering:
-            #data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
+            data_df['index'] = np.linalg.norm(data_df[['index_x', 'index_y', 'index_z']].values, axis=1)
             data_df['middle'] = np.linalg.norm(data_df[['middle_x', 'middle_y', 'middle_z']].values, axis=1)
             data_df['thumb'] = np.linalg.norm(data_df[['thumb_x', 'thumb_y', 'thumb_z']].values, axis=1)
 
@@ -52,7 +52,7 @@ def read_data(files, labels, fps, feature_engineering):
                                             'middle_x', 'middle_y', 'middle_z',
                                             'thumb_x', 'thumb_y', 'thumb_z'])
         else:
-            data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z','index_x', 'index_y', 'index_z'])
+            data_df = data_df.drop(columns=['ring_x', 'ring_y', 'ring_z'])
 
         data_df["fruit"] = fruit_and_env[0]
         data_df["environment"] = fruit_and_env[1]

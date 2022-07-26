@@ -21,3 +21,12 @@ def _segment_intervals(Yi):
     intervals = [(idxs[i],idxs[i+1]) for i in range(len(idxs)-1)]
 
     return intervals
+
+def _get_preds_and_labels(logits_tensor,y_tensor):
+
+    logits = logits_tensor.cpu().detach().numpy()
+    preds = np.argmax(logits,axis = 1)
+
+    labels = y_tensor.cpu().detach().numpy()
+
+    return preds,labels

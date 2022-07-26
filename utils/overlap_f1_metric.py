@@ -1,24 +1,22 @@
 import numpy as np
-from utils.metrics_utils import _segment_intervals, _segment_labels
+from utils.metrics_utils import _segment_intervals, _segment_labels, _get_preds_and_labels
 
 def f1_score(logits, labels):
-    logits = logits.detach().numpy()
-    preds = np.argmax(logits,axis = 1)
 
-    labels = labels.detach().numpy()
+    preds, labels = _get_preds_and_labels(logits,labels)
     #
     # print(preds)
     # print(labels)
-
-
     # acc = get_accuracy(preds,labels)
     # print(f"accuracy: {acc}")
+    # overlap_f1_score, overlap_threshold = get_overlap_f1(preds, labels)
+    #
+    # print(f"f1 score at {overlap_threshold*100} overlap: {overlap_f1_score}")
+    overlap_thresholds = [0.1, 0.25,0.50]
 
-    overlap_f1_score, overlap_threshold = get_overlap_f1(preds, labels)
+    overlap_scores = [get_overlap_f1(preds, labels,overlap=t) for t in overlap_thresholds]
 
-    print(f"f1 score at {overlap_threshold*100} overlap: {overlap_f1_score}")
-
-
+    return overlap_scores
 
 
 def get_overlap_f1(prediction,ground_truth, n_classes = 6, overlap = 0.1 ):

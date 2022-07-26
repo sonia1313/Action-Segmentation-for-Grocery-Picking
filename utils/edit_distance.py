@@ -41,6 +41,6 @@ def edit_score(logits, labels, norm=True):
 
     score = _levenshtein_distance(pred_labels, true_labels, norm)
 
-    print(f"edit score: {score}")
+    #print(f"edit score: {score}")
 
     return score
