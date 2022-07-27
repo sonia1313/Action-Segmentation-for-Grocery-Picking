@@ -11,15 +11,13 @@ def _plot_cm(cm, path = None):
     df_cm = pd.DataFrame(cm.cpu().numpy(), index=range(6), columns=range(6))
     sns.set_theme()
 
-    cm_fig = sns.heatmap(df_cm, annot=True, xticklabels=x, yticklabels=y, cbar_kws=None).get_figure()
+    cm_plot = sns.heatmap(df_cm, annot=True, xticklabels=x, yticklabels=y, cbar_kws=None)
 
-    if path:
-        cm_fig.savefig(path, dpi = cm_fig.dpi)
+    cm_fig = cm_plot.get_figure()
 
-    else:
-        
-        cm_fig.savefig(f"confusion_matrix_figs/{self.experiment_name}_cm_{self.counter}.png", dpi=cm_fig.dpi)
 
-    plt.close(cm_fig)
+    cm_fig.savefig(path, dpi=cm_fig.dpi)
 
-    return cm_fig
+    plt.close()
+
+    return cm_plot

@@ -1,13 +1,12 @@
 import numpy as np
 from numba import njit
 
-
 from utils.metrics_utils import _get_preds_and_labels, _segment_labels
 
 
 @njit
-#@jit(float64(int64[:], int64[:], boolean), nopython=True)
-#@jit(nopython=True)
+# @jit(float64(int64[:], int64[:], boolean), nopython=True)
+# @jit(nopython=True)
 def _levenshtein_distance(p, y, norm=False):
     m_row = len(p)
     n_col = len(y)
@@ -33,6 +32,7 @@ def _levenshtein_distance(p, y, norm=False):
 
     return score
 
+
 def edit_score(logits, labels, norm=True):
     predictions, labels = _get_preds_and_labels(logits, labels)
 
@@ -41,6 +41,6 @@ def edit_score(logits, labels, norm=True):
 
     score = _levenshtein_distance(pred_labels, true_labels, norm)
 
-    #print(f"edit score: {score}")
+    # print(f"edit score: {score}")
 
     return score

@@ -165,17 +165,30 @@ class EnsembleVotingModel(pl.LightningModule):
         cm = self.confusion_matrix(preds, targets)
         cm_fig = self._plot_cm(cm)
 
-        self.log("average_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("average test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.wb_ensemble.log({"average_test_loss": loss, "average_test_accuracy": accuracy, "confusion_matrix":cm_fig})
+        self.wb_ensemble.log({"test_loss": loss, "test_accuracy": accuracy, "confusion_matrix":cm_fig})
         return {'loss': loss, 'preds': logits, 'target': y}
 
-    def _get_preds(self, model, X, y, teacher_forcing=0.0):
-        logits = model(X, y, teacher_forcing)
-        logits = logits.squeeze(0)  # remove the batch dimension
-        return logits
+    def _get_preds_and_loss(self, X, y, teacher_forcing):
 
+        logits = self(X, y, teacher_forcing)
+
+        # logits: batch_size,max_seqlen-1,n_classes e.g.[1,194,6]
+        # y: batch_size,max_seqlen-1 e.g. [1,194]
+        logits_dim = logits.shape[-1]
+
+        logits = logits[0][1:].view(-1, logits_dim)
+        y = y[0][1:].view(-1)
+        # logits: max_seqlen-1,n_classes e.g.[193,6]
+        # y: max_seqlen-1 e.g. [193]
+
+        logits = logits.type_as(X)
+
+        loss = self.loss_module(logits, y)
+
+        return logits, loss
     # def test_step_end(self,output_results):
     #     print(output_results)
     #     return output_results

@@ -76,7 +76,7 @@ def get_overlap_f1(prediction,ground_truth, n_classes = 6, overlap = 0.1 ):
     # If the prec+recall=0, it is a NaN. Set these to 0.
    # F1 = np.nan_to_num(F1)
 
-    return F1*100, overlap
+    return F1*100
 
 # print(_segment_intervals(test_case_target))
 # print(_segment_intervals(test_case_preds))
