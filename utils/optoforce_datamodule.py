@@ -1,29 +1,33 @@
+"""
+Author - Sonia Mathews
+optoforce_datamodule.py
+
+This script has been adapted by the author from:
+https://github.com/Lightning-AI/lightning/blob/master/examples/pl_loops/kfold.py
+to perfom KFold cross validation for the dataset used in this project.
+(And to perform experiment tracking on Weights and Biases)
+"""
+
 import pytorch_lightning as pl
-import torch
 from pytorch_lightning.loops import FitLoop, Loop
 from torch import nn
 from torch.utils.data import DataLoader, random_split, Dataset, Subset
 from torchmetrics import Accuracy, ConfusionMatrix
 import os.path as osp
-from torch.nn import functional as F
+
+from utils.edit_distance import edit_score
 from utils.optoforce_data_loader import OpToForceDataset
+from utils.overlap_f1_metric import f1_score
+from utils.plot_confusion_matrix import _plot_cm
 from utils.preprocessing import *
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
-from os import path
 from typing import Any, Dict, List, Optional, Type
 from pytorch_lightning.trainer.states import TrainerFn
 from sklearn.model_selection import KFold
-from models.encoder_decoder_lstm import LitEncoderDecoderLSTM
+
 import wandb
-
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-import pandas as pd
-
-PATH_TO_DIR = 'C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project'
 
 
 #############################################################################################
@@ -74,14 +78,6 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
         self.prepare_data_per_node = True
         self._log_hyperparams = True
 
-    # def prepare_data(self) -> None:
-    #     files, labels = get_files(PATH_TO_DIR)
-    #
-    #     frames, action_segment_td, ground_truth_actions = read_data(files, labels)
-    #     frames = standardise_features(append_labels_per_frame(frames, action_segment_td, ground_truth_actions))
-    #     actions_per_seq, unique_actions, index_label_map = one_hot_encode_labels(frames)
-    #     self.X_data, self.y_data = pad_data(frames, actions_per_seq)
-
     def setup(self, stage: Optional[str] = None) -> None:
         if stage is None or stage == 'fit':
             dataset = OpToForceDataset(self.X_data, self.y_data)
@@ -108,9 +104,6 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)
 
-    # def predict_dataloader(self) -> DataLoader:
-    #     return DataLoader(self.test_dataset)
-
     def __post_init__(cls):
         super().__init__()
 
@@ -120,7 +113,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 n_features: int, hidden_size: int, n_layers: int, wb_group_name: str) -> None:
+                 n_features: int, hidden_size: int, n_layers: int, wb_project_name: str, wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
         self.n_features = n_features
@@ -132,12 +125,13 @@ class EnsembleVotingModel(pl.LightningModule):
             [model_cls.load_from_checkpoint(p, n_features=self.n_features,
                                             hidden_size=self.hidden_size,
                                             n_layers=self.n_layers) for p in checkpoint_paths])
-        self.acc = Accuracy(ignore_index=-1)
+        self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
+
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
         self.counter = 0
         self.experiment_name = wb_group_name
-        self.wb_ensemble = wandb.init(project='Tactile_Action_Segmentation', group=self.experiment_name,
+        self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
                                       job_type='test')
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
@@ -150,65 +144,80 @@ class EnsembleVotingModel(pl.LightningModule):
         logits_per_model = []
 
         for m in self.models:
-            logits = self._get_preds(m, X, y)  # not sure if this will work
+            logits = self._get_preds(m, X, y)
             logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
+        y = y[0][1:].view(-1)  # shape = [max_seq_len-1]
 
-        logits = logits.type_as(X)
-
-        loss = self.loss_module(logits, y.squeeze(0))
-        accuracy = self.acc(logits, y.squeeze(0))
+        loss = self.loss_module(logits, y)
+        accuracy = self.acc(logits, y)
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
         preds, targets = remove_padding(logits, y)
 
         cm = self.confusion_matrix(preds, targets)
-        cm_fig = self._plot_cm(cm)
+        fig = _plot_cm(cm, path=f"ensemble_cm_figs/{self.experiment_name}-ensemble-cm-{self.counter}.png")
 
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        f1_scores = f1_score(preds, targets)
+        edit = edit_score(preds, targets)
 
-        self.wb_ensemble.log({"test_loss": loss, "test_accuracy": accuracy, "confusion_matrix":cm_fig})
-        return {'loss': loss, 'preds': logits, 'target': y}
+        self.wb_ensemble.log({"test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
+        return accuracy, edit, f1_scores
 
-    def _get_preds_and_loss(self, X, y, teacher_forcing):
+    def test_epoch_end(self, outputs):
 
-        logits = self(X, y, teacher_forcing)
+        f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean = self._get_average_metrics(outputs)
+
+        print(f"average test f1 overlap @ 10%: {f1_10_mean}")
+        print(f"average test f1 overlap @ 25%: {f1_25_mean}")
+        print(f"average test f1 overlap @ 50%: {f1_50_mean}")
+        print(f"average test edit: {edit_mean}")
+        print(f"average test accuracy : {accuracy_mean}")
+
+        self.wb_ensemble.log({"average_test_f1_10": f1_10_mean, "average_test_f1_25": f1_25_mean,
+                              "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
+                              "average_test_accuracy": accuracy_mean})
+
+    def _get_preds(self, model, X, y, teacher_forcing=0.0):
+
+        logits = model(X, y, teacher_forcing)
 
         # logits: batch_size,max_seqlen-1,n_classes e.g.[1,194,6]
         # y: batch_size,max_seqlen-1 e.g. [1,194]
         logits_dim = logits.shape[-1]
 
         logits = logits[0][1:].view(-1, logits_dim)
-        y = y[0][1:].view(-1)
+
         # logits: max_seqlen-1,n_classes e.g.[193,6]
-        # y: max_seqlen-1 e.g. [193]
 
         logits = logits.type_as(X)
+        return logits
 
-        loss = self.loss_module(logits, y)
+    def _get_average_metrics(self, outputs):
 
-        return logits, loss
-    # def test_step_end(self,output_results):
-    #     print(output_results)
-    #     return output_results
+        f1_10_outs = []
+        f1_25_outs = []
+        f1_50_outs = []
+        edit_outs = []
+        accuracy_outs = []
+        for i, out in enumerate(outputs):
+            a, e, f = out
+            f1_10_outs.append(f[0])
+            f1_25_outs.append(f[1])
+            f1_50_outs.append(f[2])
 
-    def _plot_cm(self, cm):
-        #label_to_index_map = {'move-in': 0, 'manipulate': 1, 'grasp': 2, 'pick-up': 3, 'move-out': 4, 'drop': 5}
+            edit_outs.append(e)
+            accuracy_outs.append(a)
 
-        y = x = ['move-in', 'manipulate', 'grasp', 'pick-up', 'move-out', 'drop']
+        f1_10_mean = np.stack([x for x in f1_10_outs]).mean(0)
+        f1_25_mean = np.stack([x for x in f1_25_outs]).mean(0)
+        f1_50_mean = np.stack([x for x in f1_50_outs]).mean(0)
+        edit_mean = np.stack([x for x in edit_outs]).mean(0)
+        accuracy_mean = torch.mean(torch.stack([x for x in accuracy_outs]))
 
-        plt.figure(figsize=(10, 10))
-        df_cm = pd.DataFrame(cm.cpu().numpy(), index=range(6), columns=range(6))
-        sns.set_theme()
-
-        cm_fig = sns.heatmap(df_cm, annot=True, xticklabels=x, yticklabels=y, cbar_kws=None).get_figure()
-
-        cm_fig.savefig(f"confusion_matrix_figs/{self.experiment_name}_cm_{self.counter}.png", dpi=cm_fig.dpi)
-
-        plt.close(cm_fig)
-
-        return cm_fig
+        return f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean
 
 
 #############################################################################################
@@ -271,10 +280,11 @@ class KFoldLoop(Loop):
     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
         print(f"STARTING FOLD {self.current_fold}")
-        self.wb_run = wandb.init(reinit=True, project='Tactile_Action_Segmentation',
-                                 group=self.wb_cfg['kfold']['group'], job_type=self.wb_cfg['kfold']['job_type'],
+        self.wb_run = wandb.init(reinit=True, project=self.wb_cfg['project'],
+                                 group=self.wb_cfg['group'], job_type='cross-val',
                                  id=f'current_fold_{self.current_fold}')
 
+        # tracking gradients and hyperparameters
         self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
 
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
@@ -304,10 +314,13 @@ class KFoldLoop(Loop):
     def on_run_end(self) -> None:
         """Used to compute the performance of the ensemble model on the test set."""
         checkpoint_paths = [osp.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
-        voting_model = EnsembleVotingModel(type(self.trainer.lightning_module), checkpoint_paths
+        voting_model = EnsembleVotingModel(type(self.trainer.lightning_module),
+                                           checkpoint_paths
                                            , n_features=self.n_features,
                                            hidden_size=self.hidden_size,
-                                           n_layers=self.n_layers, wb_group_name=self.wb_cfg['ensemble']['group'])
+                                           n_layers=self.n_layers,
+                                           wb_project_name=self.wb_cfg['project'],
+                                           wb_group_name=self.wb_cfg['group'])
         voting_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
         self.trainer.strategy.connect(voting_model)
@@ -340,25 +353,3 @@ class KFoldLoop(Loop):
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
-
-#
-# if __name__ == "__main__":
-#     pl.seed_everything(42)
-#     X_data, y_data, labels_map = preprocess_dataset(PATH_TO_DIR)
-#     model = LitEncoderDecoderLSTM(n_features = 3, hidden_size = 100, n_layers = 1)
-#     datamodule = OpToForceKFoldDataModule(X_data, y_data)
-#     trainer = pl.Trainer(
-#         max_epochs=10,
-#         limit_train_batches=1,
-#         limit_val_batches=1,
-#         limit_test_batches=1,
-#         num_sanity_val_steps=0,
-#         # devices=2,
-#         accelerator="auto",
-#         # strategy="ddp", #gives AttributeError: 'DistributedDataParallel' object has no attribute 'test_step'
-#     )
-#
-#     internal_fit_loop = trainer.fit_loop
-#     trainer.fit_loop = KFoldLoop(5, export_path="cross-validation/encoder_decoder_kfold")
-#     trainer.fit_loop.connect(internal_fit_loop)
-#     trainer.fit(model, datamodule)

@@ -11,7 +11,7 @@ def _plot_cm(cm, path = None):
     df_cm = pd.DataFrame(cm.cpu().numpy(), index=range(6), columns=range(6))
     sns.set_theme()
 
-    cm_plot = sns.heatmap(df_cm, annot=True, xticklabels=x, yticklabels=y, cbar_kws=None)
+    cm_plot = sns.heatmap(df_cm, annot=True, xticklabels=x, yticklabels=y, cbar_kws=None, fmt='g')
 
     cm_fig = cm_plot.get_figure()
 
@@ -20,4 +20,4 @@ def _plot_cm(cm, path = None):
 
     plt.close()
 
-    return cm_plot
+    return cm_fig

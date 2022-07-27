@@ -3,11 +3,12 @@ import os
 import pytorch_lightning as pl
 import importlib.util
 import torch
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 from utils.optoforce_data_loader import load_data
 from utils.optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 from utils.preprocessing import preprocess_dataset
-import wandb
+import wandb as wb
 from pytorch_lightning.loggers import WandbLogger
 import argparse
 
@@ -21,15 +22,7 @@ def load_config(config_name):
         return config
 
 
-# config = load_config("encoder_decoder_baseline.yaml")
-#
-# model_pth = config['model']['script_path']
-#
-# model = getattr(importlib.import_module(model_pth), config['model']['name'])()
-# model =importlib.import_module(model_pth)
 
-
-# odel.loader.exec_module(importlib.util.module_from_spec(model))
 
 def _get_model(module_name, path, pl_class_name):
     model_spec = importlib.util.spec_from_file_location(module_name, path)
@@ -58,25 +51,34 @@ def main(yaml_file):
 
     model = model(n_features=config['model']['n_features'],
                   hidden_size=config['model']['n_hidden_units'],
-                  n_layers=config['model']['n_layers'], experiment_tracking=False)
+                  n_layers=config['model']['n_layers'], exp_name=config['experiment_name'],
+                  experiment_tracking=True)
 
     X_data, y_data, _ = preprocess_dataset(config['dataset']['preprocess'])
+    print(f"no_sequences:{len(X_data)}")
+    wb.init(project="testing")
 
-    trainer = pl.Trainer(default_root_dir=config['train']['checkpoint_path'], gpus=n_gpu,
+    checkpoint_callback = ModelCheckpoint(save_last=True,
+                                          monitor="val_acc",
+                                          mode="max",
+                                          filename=f"{config['experiment_name']}"'-{epoch:02d}-{val_loss:.2f}')
+
+    trainer = pl.Trainer(default_root_dir=f"{config['train']['checkpoint_path']}/{config['experiment_name']}",
+                         callbacks=[checkpoint_callback],
+                         gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
-                         # limit_train_batches=2,
-                         # limit_val_batches=2,
-                         # limit_test_batches=2,
                          num_sanity_val_steps=0,
                          accelerator="auto",
                          num_nodes=1,
 
                          )
-    train_loader, val_loader, test_loader = load_data(X_data, y_data)
+    train_loader, val_loader, test_loader = load_data(X_data, y_data, batch_size=config['train']['batch_size'])
     trainer.fit(model, train_loader, val_loader)
 
-    trainer.test(dataloaders=test_loader)
+    ckpt_path = trainer.checkpoint_callback.last_model_path
+    print(ckpt_path)
+    trainer.test(dataloaders=test_loader, ckpt_path=ckpt_path)
 
 
 if __name__ == '__main__':
