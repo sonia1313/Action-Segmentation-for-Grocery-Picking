@@ -1,0 +1,38 @@
+experiment_name: tcn_test
+wb_project_name: TCN_Debugging
+main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
+notes: testing out tcn
+seed: 42
+
+dataset:
+  preprocess:
+    data_path: dataset #get_files()
+    clutter: True #get_files()
+    single: True #get_files()
+    frames_per_sec: 3 #6 #1 #15  #read_data()
+    feature_engineering: True #True #read_data()
+    standardise_data: False #preprocess_dataset()
+    normalize_data: True #preprocess_dataset()
+    pad_data: True #preprocess_dataset()
+
+
+model:
+  module_name: many_to_many_lstm
+  pl_class_name : LitManyToManyLSTM
+  script_path: models/baseline_lstm_1_layer.py
+  #set n_features according to preprocess dataset conditions
+    #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
+  n_features: 3
+  n_layers: 2
+  n_hidden_units: 50 #00 #2 #50 #100 #250
+  #dropout not in use
+  dropout: 0.55
+  dropout_in_lstm: True
+  dropout_between_lstm: False
+
+
+
+train:
+  checkpoint_path: logging
+  batch_size: 1
+  epochs: 20 #1 #15 #20 #20 #50 #3 #20 #20 #5 #20 #25
