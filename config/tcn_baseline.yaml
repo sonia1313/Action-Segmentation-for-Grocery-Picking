@@ -9,7 +9,7 @@ dataset:
     data_path: dataset #get_files()
     clutter: True #get_files()
     single: True #get_files()
-    frames_per_sec: 3 #6 #1 #15  #read_data()
+    frames_per_sec: 1 #6 #1 #15  #read_data()
     feature_engineering: True #True #read_data()
     standardise_data: False #preprocess_dataset()
     normalize_data: True #preprocess_dataset()
@@ -17,18 +17,19 @@ dataset:
 
 
 model:
-  module_name: many_to_many_lstm
-  pl_class_name : LitManyToManyLSTM
-  script_path: models/baseline_lstm_1_layer.py
+  module_name: tcn
+  pl_class_name : LitTemporalConvNet
+  script_path: models/tcn.py
   #set n_features according to preprocess dataset conditions
     #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
   n_features: 3
-  n_layers: 2
-  n_hidden_units: 50 #00 #2 #50 #100 #250
+  n_hidden_units: 25
+  n_levels: 8
+  kernel_size: 7
   #dropout not in use
-  dropout: 0.55
-  dropout_in_lstm: True
-  dropout_between_lstm: False
+  dropout: 0.0
+  lr: 0.001
+
 
 
 

@@ -90,7 +90,7 @@ class LitTemporalConvNet(pl.LightningModule):
 
         self.save_hyperparameters()
 
-        self.tcn = TemporalConvNet(n_features=self.n_features, n_classes=self.n_classes, num_channels=self.num_channels,
+        self.tcn = TemporalConvNet(n_features=self.n_features, n_classes=self.n_classes, num_channels_per_level=self.num_channels,
                                    kernel_size=self.kernel_size,
                                    dropout=self.dropout)
 
@@ -114,13 +114,15 @@ class LitTemporalConvNet(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         X, y = batch
 
-        logits = self(X)
+        data = torch.permute(X, (0,2,1))
+
+        logits = self(data)
         # logits shape?
 
         y = y[0][:].view(-1)
         loss = self.loss_module(logits, y)
 
-        accuracy = self.train_acc(logits)
+        accuracy = self.train_acc(logits,y)
 
         self.log('train_loss', loss, on_step=False, on_epoch=True)
 
@@ -131,7 +133,9 @@ class LitTemporalConvNet(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         X, y = batch
 
-        logits = self(X)
+        data = torch.permute(X, (0, 2, 1))
+
+        logits = self(data)
 
         y = y[0][:].view(-1)
 
