@@ -9,6 +9,7 @@ to perfom KFold cross validation for the dataset used in this project.
 """
 
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.loops import FitLoop, Loop
 from torch import nn
 from torch.utils.data import DataLoader, random_split, Dataset, Subset
@@ -99,7 +100,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
         self.splits = [split for split in
-                       KFold(num_folds, shuffle=True, random_state=42).split(range(len(self.train_dataset)))]
+                       KFold(num_folds, shuffle=True, random_state=self.seed).split(range(len(self.train_dataset)))]
 
     def setup_fold_index(self, fold_index: int) -> None:
         train_indices, val_indices = self.splits[fold_index]
@@ -125,13 +126,15 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 n_features: int, hidden_size: int, n_layers: int, dropout: float, lr: float, wb_project_name: str,
+                 n_features: int, n_hid: int, n_levels: int, kernel_size: int, dropout: float, lr: float,
+                 wb_project_name: str,
                  wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
         self.n_features = n_features
-        self.hidden_size = hidden_size
-        self.n_layers = n_layers
+        self.n_hid = n_hid
+        self.n_levels = n_levels
+        self.kernel_size = kernel_size
         self.dropout = dropout
         self.lr = lr
 
@@ -139,10 +142,12 @@ class EnsembleVotingModel(pl.LightningModule):
 
         self.models = torch.nn.ModuleList(
             [model_cls.load_from_checkpoint(p, n_features=self.n_features,
-                                            hidden_size=self.hidden_size,
-                                            n_layers=self.n_layers,
+                                            n_hid=self.n_hid,
+                                            n_levels=self.n_levels,
+                                            kernel_size=self.kernel_size,
                                             dropout=self.dropout,
-                                            lr=self.lr) for p in checkpoint_paths])
+                                            lr=self.lr,
+                                            exp_name=wb_group_name) for p in checkpoint_paths])
 
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
@@ -161,11 +166,13 @@ class EnsembleVotingModel(pl.LightningModule):
 
         # print(f"test_step_from ensemble: {X[0]}")
 
-        logits_per_model = []
+        data = torch.permute(X, (0, 2, 1))
 
-        for m in self.models:
-            logits = self._get_preds(m, X, y)
-            logits_per_model.append(logits)
+        logits_per_model = [m(data) for m in self.models]
+
+        # for m in self.models:
+        #     logits = m(data)
+        #     logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
         y = y[0][:].view(-1)  # shape = [max_seq_len]
@@ -198,20 +205,6 @@ class EnsembleVotingModel(pl.LightningModule):
         self.wb_ensemble.log({"average_test_f1_10": f1_10_mean, "average_test_f1_25": f1_25_mean,
                               "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
                               "average_test_accuracy": accuracy_mean})
-
-    def _get_preds(self, model, X, y):
-        logits = model(X, y)
-
-        # logits: batch_size,max_seqlen-1,n_classes e.g.[1,194,6]
-        # y: batch_size,max_seqlen-1 e.g. [1,194]
-        logits_dim = logits.shape[-1]
-
-        logits = logits[0][:].view(-1, logits_dim)
-
-        # logits: max_seqlen-1,n_classes e.g.[193,6]
-
-        logits = logits.type_as(X)
-        return logits
 
     # def _get_average_metrics(self, outputs):
     #
@@ -266,24 +259,24 @@ class EnsembleVotingModel(pl.LightningModule):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int,
-                 dropout: float, lr: float, project_name:str, experiment_name:str) -> None:
+    def __init__(self, num_folds: int, export_path: str, n_features: int, n_hid: int, n_levels: int,
+                 kernel_size:int, dropout: float, lr: float, project_name: str, experiment_name: str, config:dict) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
         self.export_path = export_path
 
         self.n_features = n_features
-        self.hidden_size = hidden_size
-        self.n_layers = n_layers
+        self.n_hid = n_hid
+        self.n_levels = n_levels
+        self.kernel_size = kernel_size
         self.dropout = dropout
         self.lr = lr
 
-        #experiment tracking meta info
+        # experiment tracking meta info
         self.project_name = project_name
         self.experiment_name = experiment_name
-
-
+        self.config = config
 
     @property
     def done(self) -> bool:
@@ -308,7 +301,7 @@ class KFoldLoop(Loop):
 
         self.wb_run = wandb.init(reinit=True, project=self.project_name,
                                  group=self.experiment_name, job_type='cross-val',
-                                 id=f'current_fold_{self.current_fold}',dir='wandb_runs')
+                                 id=f'current_fold_{self.current_fold}', dir='wandb_runs', config=self.config)
 
         # tracking gradients and hyperparameters
         self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
@@ -343,8 +336,9 @@ class KFoldLoop(Loop):
         voting_model = EnsembleVotingModel(type(self.trainer.lightning_module),
                                            checkpoint_paths
                                            , n_features=self.n_features,
-                                           hidden_size=self.hidden_size,
-                                           n_layers=self.n_layers,
+                                           n_hid=self.n_hid,
+                                           n_levels=self.n_levels,
+                                           kernel_size = self.kernel_size,
                                            dropout=self.dropout,
                                            lr=self.lr,
                                            wb_project_name=self.project_name,

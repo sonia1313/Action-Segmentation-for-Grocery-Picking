@@ -8,6 +8,7 @@ from utils.metrics_utils import _get_preds_and_labels, _segment_labels
 # @jit(float64(int64[:], int64[:], boolean), nopython=True)
 # @jit(nopython=True)
 def _levenshtein_distance(p, y, norm=False):
+    #print(f"norm :{ norm}")
     m_row = len(p)
     n_col = len(y)
     D = np.zeros((m_row + 1, n_col + 1)).astype(np.float64)

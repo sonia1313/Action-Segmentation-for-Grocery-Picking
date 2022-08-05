@@ -1,6 +1,6 @@
 """
 Author - Sonia Mathews
-kfold_optoforce_datamodule.py
+lstm_kfold_optoforce_datamodule.py
 
 This script has been adapted by the author from:
 https://github.com/Lightning-AI/lightning/blob/master/examples/pl_loops/kfold.py
@@ -70,7 +70,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, X_data: [float], y_data: [int], single: bool, clutter: bool, batch_size: int = 1, ):
+    def __init__(self, X_data: [float], y_data: [int], single: bool, clutter: bool, seed:int, batch_size: int = 1):
         self.batch_size = batch_size
         self.X_data = X_data
         self.y_data = y_data
@@ -89,17 +89,18 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
         self.test_size = test_size  # 5 when using clutter
         self.prepare_data_per_node = True
         self._log_hyperparams = True
+        self.seed = seed
 
     def setup(self, stage: Optional[str] = None) -> None:
         if stage is None or stage == 'fit':
             dataset = OpToForceDataset(self.X_data, self.y_data)
             self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size],
-                                                                 generator=torch.Generator().manual_seed(42))
+                                                                 generator=torch.Generator().manual_seed(self.seed))
 
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
         self.splits = [split for split in
-                       KFold(num_folds, shuffle=True, random_state=42).split(range(len(self.train_dataset)))]
+                       KFold(num_folds, shuffle=True, random_state=self.seed).split(range(len(self.train_dataset)))]
 
     def setup_fold_index(self, fold_index: int) -> None:
         train_indices, val_indices = self.splits[fold_index]
@@ -142,7 +143,8 @@ class EnsembleVotingModel(pl.LightningModule):
                                             hidden_size=self.hidden_size,
                                             n_layers=self.n_layers,
                                             dropout=self.dropout,
-                                            lr=self.lr) for p in checkpoint_paths])
+                                            lr=self.lr,
+                                            exp_name =wb_group_name ) for p in checkpoint_paths])
 
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
@@ -152,7 +154,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.experiment_name = wb_group_name
 
         self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
-                                      job_type='test')
+                                      job_type='test', dir='wandb_runs')
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
@@ -267,7 +269,7 @@ class EnsembleVotingModel(pl.LightningModule):
 
 class KFoldLoop(Loop):
     def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int,
-                 dropout: float, lr: float, project_name:str, experiment_name:str) -> None:
+                 dropout: float, lr: float, project_name:str, experiment_name:str, config:dict) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
@@ -282,7 +284,7 @@ class KFoldLoop(Loop):
         #experiment tracking meta info
         self.project_name = project_name
         self.experiment_name = experiment_name
-
+        self.config = config
 
 
     @property
@@ -308,7 +310,7 @@ class KFoldLoop(Loop):
 
         self.wb_run = wandb.init(reinit=True, project=self.project_name,
                                  group=self.experiment_name, job_type='cross-val',
-                                 id=f'current_fold_{self.current_fold}')
+                                 id=f'current_fold_{self.current_fold}',dir='wandb_runs', config=self.config)
 
         # tracking gradients and hyperparameters
         self.wb_run.watch(self.trainer.model, log='all', log_freq=1)

@@ -21,10 +21,10 @@ def get_files(path, clutter=True, single=False):
     # files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
     # labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
 
-    if clutter and single == False:
+    if clutter == True and single == False:
         files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
         labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
-    elif single and clutter == False:
+    elif single == True and clutter == False:
         files = glob.glob(f"{path}/*/single/[0-9]*/optoforce_data.csv")
         labels = glob.glob(f"{path}/*/single/[0-9]*/labels")
     else:
@@ -113,6 +113,7 @@ def normalize_features(frames, features):
 
     return frames
 
+
 def encode_labels(frames):
     # unique_actions = set()
 
@@ -172,45 +173,42 @@ def convert_to_tensor(frames, actions_per_seq, features):
 
 
 def remove_padding(predictions_padded, targets_padded):
-    #print(f"shape of padded targets {targets_padded.shape}")
+    # print(f"shape of padded targets {targets_padded.shape}")
     mask = (targets_padded >= 0).long()  # only outputs labels that is >= 0
-    #print(mask)
-    #print(f"shape of mask {mask.shape}")
+    # print(mask)
+    # print(f"shape of mask {mask.shape}")
 
     n = len([out for out in mask.squeeze() if out.all() >= 1])
-    #print(n)
-    outputs = predictions_padded.squeeze()[:n, :] #(unpadded_seq_len-1,6) e.g ([120,6])
-    #print(f"unpadded outputs {outputs.shape}")
+    # print(n)
+    outputs = predictions_padded.squeeze()[:n, :]  # (unpadded_seq_len-1,6) e.g ([120,6])
+    # print(f"unpadded outputs {outputs.shape}")
 
     targets_padded = targets_padded.squeeze()
     targets = targets_padded[:n]
-    #print(f"unpadded targets {targets.shape}") #([unpadded_seq_len-1]) e.g ([120])
+    # print(f"unpadded targets {targets.shape}") #([unpadded_seq_len-1]) e.g ([120])
     # _, targets = targets.max(dim=1)  # remove one hot encoding
 
     return outputs, targets
 
 
 def preprocess_dataset(cfg_preprocess):
-    files, labels = get_files(cfg_preprocess['data_path'])
+    files, labels = get_files(cfg_preprocess['data_path'],
+                              single=cfg_preprocess['single'],
+                              clutter=cfg_preprocess['clutter'])
     frames, action_segment_td, ground_truth_actions, features = read_data(files, labels,
                                                                           cfg_preprocess['frames_per_sec'],
                                                                           cfg_preprocess['feature_engineering'])
-
+    print(f"features:{features}")
     frames = append_labels_per_frame(frames, action_segment_td, ground_truth_actions)
-    #print(len(frames))
+    # print(len(frames))
     if cfg_preprocess['standardise_data']:
         frames = standardise_features(frames, features)
     if cfg_preprocess['normalize_data']:
         frames = normalize_features(frames, features)
 
-    #print(len(frames))
+    # print(len(frames))
     actions_per_seq, label_to_index_map = encode_labels(frames)
 
-    if cfg_preprocess['pad_data']:
-
-        X_data, y_data = pad_data(frames, actions_per_seq,
-                                  n_sequences=len(files), features=features)
-    else:
-        X_data, y_data = convert_to_tensor(frames, actions_per_seq, features=features)
+    X_data, y_data = pad_data(frames, actions_per_seq, n_sequences=len(files), features=features)
 
     return X_data, y_data, label_to_index_map
