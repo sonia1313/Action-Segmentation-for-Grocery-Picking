@@ -1,6 +1,6 @@
 """
 Author - Sonia Mathews
-optoforce_datamodule.py
+kfold_optoforce_datamodule.py
 
 This script has been adapted by the author from:
 https://github.com/Lightning-AI/lightning/blob/master/examples/pl_loops/kfold.py
@@ -16,6 +16,7 @@ from torchmetrics import Accuracy, ConfusionMatrix
 import os.path as osp
 
 from utils.edit_distance import edit_score
+from utils.metrics_utils import _get_average_metrics
 from utils.optoforce_data_loader import OpToForceDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
@@ -69,10 +70,21 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, X_data: [float], y_data: [int], batch_size: int = 1, train_size=25, test_size=5):
+    def __init__(self, X_data: [float], y_data: [int], single: bool, clutter: bool, batch_size: int = 1, ):
         self.batch_size = batch_size
         self.X_data = X_data
         self.y_data = y_data
+        if single == True and clutter == False:
+            train_size = 25
+            test_size = 4
+
+        elif single == False and clutter == True:
+            train_size = 25
+            test_size = 5
+        else:  # when using single and clutter
+            train_size = 55
+            test_size = 4
+
         self.train_size = train_size  # 25 when using clutter
         self.test_size = test_size  # 5 when using clutter
         self.prepare_data_per_node = True
@@ -113,24 +125,32 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 n_features: int, hidden_size: int, n_layers: int, wb_project_name: str, wb_group_name: str) -> None:
+                 n_features: int, hidden_size: int, n_layers: int, dropout: float, lr: float, wb_project_name: str,
+                 wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
         self.n_features = n_features
         self.hidden_size = hidden_size
         self.n_layers = n_layers
+        self.dropout = dropout
+        self.lr = lr
+
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.models = torch.nn.ModuleList(
             [model_cls.load_from_checkpoint(p, n_features=self.n_features,
                                             hidden_size=self.hidden_size,
-                                            n_layers=self.n_layers) for p in checkpoint_paths])
+                                            n_layers=self.n_layers,
+                                            dropout=self.dropout,
+                                            lr=self.lr) for p in checkpoint_paths])
+
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
 
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
         self.counter = 0
         self.experiment_name = wb_group_name
+
         self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
                                       job_type='test')
 
@@ -148,7 +168,7 @@ class EnsembleVotingModel(pl.LightningModule):
             logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
-        y = y[0][1:].view(-1)  # shape = [max_seq_len-1]
+        y = y[0][:].view(-1)  # shape = [max_seq_len]
 
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
@@ -167,8 +187,7 @@ class EnsembleVotingModel(pl.LightningModule):
         return accuracy, edit, f1_scores
 
     def test_epoch_end(self, outputs):
-
-        f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean = self._get_average_metrics(outputs)
+        f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean = _get_average_metrics(outputs)
 
         print(f"average test f1 overlap @ 10%: {f1_10_mean}")
         print(f"average test f1 overlap @ 25%: {f1_25_mean}")
@@ -180,44 +199,43 @@ class EnsembleVotingModel(pl.LightningModule):
                               "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
                               "average_test_accuracy": accuracy_mean})
 
-    def _get_preds(self, model, X, y, teacher_forcing=0.0):
-
-        logits = model(X, y, teacher_forcing)
+    def _get_preds(self, model, X, y):
+        logits = model(X, y)
 
         # logits: batch_size,max_seqlen-1,n_classes e.g.[1,194,6]
         # y: batch_size,max_seqlen-1 e.g. [1,194]
         logits_dim = logits.shape[-1]
 
-        logits = logits[0][1:].view(-1, logits_dim)
+        logits = logits[0][:].view(-1, logits_dim)
 
         # logits: max_seqlen-1,n_classes e.g.[193,6]
 
         logits = logits.type_as(X)
         return logits
 
-    def _get_average_metrics(self, outputs):
-
-        f1_10_outs = []
-        f1_25_outs = []
-        f1_50_outs = []
-        edit_outs = []
-        accuracy_outs = []
-        for i, out in enumerate(outputs):
-            a, e, f = out
-            f1_10_outs.append(f[0])
-            f1_25_outs.append(f[1])
-            f1_50_outs.append(f[2])
-
-            edit_outs.append(e)
-            accuracy_outs.append(a)
-
-        f1_10_mean = np.stack([x for x in f1_10_outs]).mean(0)
-        f1_25_mean = np.stack([x for x in f1_25_outs]).mean(0)
-        f1_50_mean = np.stack([x for x in f1_50_outs]).mean(0)
-        edit_mean = np.stack([x for x in edit_outs]).mean(0)
-        accuracy_mean = torch.mean(torch.stack([x for x in accuracy_outs]))
-
-        return f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean
+    # def _get_average_metrics(self, outputs):
+    #
+    #     f1_10_outs = []
+    #     f1_25_outs = []
+    #     f1_50_outs = []
+    #     edit_outs = []
+    #     accuracy_outs = []
+    #     for i, out in enumerate(outputs):
+    #         a, e, f = out
+    #         f1_10_outs.append(f[0])
+    #         f1_25_outs.append(f[1])
+    #         f1_50_outs.append(f[2])
+    #
+    #         edit_outs.append(e)
+    #         accuracy_outs.append(a)
+    #
+    #     f1_10_mean = np.stack([x for x in f1_10_outs]).mean(0)
+    #     f1_25_mean = np.stack([x for x in f1_25_outs]).mean(0)
+    #     f1_50_mean = np.stack([x for x in f1_50_outs]).mean(0)
+    #     edit_mean = np.stack([x for x in edit_outs]).mean(0)
+    #     accuracy_mean = torch.mean(torch.stack([x for x in accuracy_outs]))
+    #
+    #     return f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean
 
 
 #############################################################################################
@@ -249,7 +267,7 @@ class EnsembleVotingModel(pl.LightningModule):
 
 class KFoldLoop(Loop):
     def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int,
-                 wb_cfg) -> None:
+                 dropout: float, lr: float, project_name:str, experiment_name:str) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
@@ -258,7 +276,14 @@ class KFoldLoop(Loop):
         self.n_features = n_features
         self.hidden_size = hidden_size
         self.n_layers = n_layers
-        self.wb_cfg = wb_cfg
+        self.dropout = dropout
+        self.lr = lr
+
+        #experiment tracking meta info
+        self.project_name = project_name
+        self.experiment_name = experiment_name
+
+
 
     @property
     def done(self) -> bool:
@@ -280,8 +305,9 @@ class KFoldLoop(Loop):
     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
         print(f"STARTING FOLD {self.current_fold}")
-        self.wb_run = wandb.init(reinit=True, project=self.wb_cfg['project'],
-                                 group=self.wb_cfg['group'], job_type='cross-val',
+
+        self.wb_run = wandb.init(reinit=True, project=self.project_name,
+                                 group=self.experiment_name, job_type='cross-val',
                                  id=f'current_fold_{self.current_fold}')
 
         # tracking gradients and hyperparameters
@@ -319,8 +345,10 @@ class KFoldLoop(Loop):
                                            , n_features=self.n_features,
                                            hidden_size=self.hidden_size,
                                            n_layers=self.n_layers,
-                                           wb_project_name=self.wb_cfg['project'],
-                                           wb_group_name=self.wb_cfg['group'])
+                                           dropout=self.dropout,
+                                           lr=self.lr,
+                                           wb_project_name=self.project_name,
+                                           wb_group_name=self.experiment_name)
         voting_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
         self.trainer.strategy.connect(voting_model)

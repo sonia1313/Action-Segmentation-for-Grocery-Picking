@@ -5,10 +5,10 @@ import importlib.util
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from utils.optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
+from utils.lstm_kfold_optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 from utils.preprocessing import preprocess_dataset
-import wandb
-from pytorch_lightning.loggers import WandbLogger
+# import wandb
+# from pytorch_lightning.loggers import WandbLogger
 import argparse
 
 CONFIG_PATH = "config"  # path from root folder
@@ -48,11 +48,23 @@ def main(yaml_file):
     # print(model)
     model = model(n_features=config['model']['n_features'],
                   hidden_size=config['model']['n_hidden_units'],
-                  n_layers=config['model']['n_layers'], exp_name=config['experiment_name'])
+                  n_layers=config['model']['n_layers'],
+                  dropout=config['model']['dropout'],
+                  lr=config['model']['lr'],
+                  exp_name=config['experiment_name'])
 
-    X_data, y_data, _ = preprocess_dataset(config['dataset']['preprocess'])
+    file = config['dataset']['preprocess']['tactile_frames_per_sec']
+    X_data, y_data = torch.load(file)
+
     print(f"no_sequences:{len(X_data)}")
-    datamodule = OpToForceKFoldDataModule(X_data, y_data)
+
+    single = config['dataset']['preprocess']['single']
+    clutter = config['dataset']['preprocess']['clutter']
+    batch_size = config['train']['batch_size']
+    datamodule = OpToForceKFoldDataModule(X_data, y_data,
+                                          single=single,
+                                          clutter=clutter,
+                                          batch_size=batch_size)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
                                           monitor="val_acc",
@@ -71,10 +83,15 @@ def main(yaml_file):
                          )
 
     internal_fit_loop = trainer.fit_loop
-    trainer.fit_loop = KFoldLoop(config['train']['n_kfolds'], export_path=config['train']['kfold_path'],
+    trainer.fit_loop = KFoldLoop(num_folds=config['train']['n_kfolds'], export_path=config['train']['kfold_path'],
                                  n_features=config['model']['n_features'],
                                  hidden_size=config['model']['n_hidden_units'],
-                                 n_layers=config['model']['n_layers'], wb_cfg=config['wb']
+                                 n_layers=config['model']['n_layers'],
+                                 dropout=config['model']['dropout'],
+                                 lr=config['model']['lr'],
+                                 project_name = config['project_name'],
+                                 experiment_name=config['experiment_name'],
+                                 config = config
                                  )
     trainer.fit_loop.connect(internal_fit_loop)
 

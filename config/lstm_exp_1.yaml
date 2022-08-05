@@ -1,7 +1,7 @@
-project_name: TCN_KFOLD
-experiment_name: tcn_testing2
+project_name: LSTM_KFOLD_Experiments
+experiment_name: lstm_tactile_exp_10
 main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
-notes: testing out tcn
+notes: testing many to many lstm on clutter and single dataset and whether feature engineering impact results
 seed: 42
 
 dataset:
@@ -10,25 +10,22 @@ dataset:
     single: True #get_files()
     tactile_frames_per_sec: data/tactile/with_feature_engineering/single_clutter_3fps.pt #directly loads dataset from data/tactile
 
+
 model:
-  module_name: tcn
-  pl_class_name : LitTemporalConvNet
-  script_path: models/tcn.py
+  module_name: many_to_many_lstm
+  pl_class_name : LitManyToManyLSTM
+  script_path: models/baseline_lstm_1_layer.py
   #set n_features according to preprocess dataset conditions
     #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
   n_features: 3
-  n_hid: 50
-  n_levels: 5
-  kernel_size: 8
-  dropout: 0.2
+  n_hidden_units: 100
+  n_layers: 1
+  dropout: 0.0
   lr: 0.001
-
-
-
 
 train:
   checkpoint_path: logging
   batch_size: 1
-  epochs: 1 #20 #1 #15 #20 #20 #50 #3 #20 #20 #5 #20 #25
+  epochs:  20
   n_kfolds: 5
-  kfold_path: cross-validation/tcn_kfold
+  kfold_path: cross-validation/lstm_kfold

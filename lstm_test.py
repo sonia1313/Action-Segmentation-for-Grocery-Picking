@@ -6,7 +6,6 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from utils.optoforce_data_loader import load_data
-from utils.optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 from utils.preprocessing import preprocess_dataset
 import wandb as wb
 from pytorch_lightning.loggers import WandbLogger
@@ -38,7 +37,8 @@ def main(yaml_file):
     config = load_config(yaml_file)
     # model_pth = config['model']['script_path']
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+    # print(config['seed'])
+    # print(type(config['seed']))
     pl.seed_everything(config['seed'], workers=True)
 
     n_gpu = 1 if torch.cuda.is_available() else 0
@@ -51,12 +51,23 @@ def main(yaml_file):
 
     model = model(n_features=config['model']['n_features'],
                   hidden_size=config['model']['n_hidden_units'],
-                  n_layers=config['model']['n_layers'], exp_name=config['experiment_name'],
+                  n_layers=config['model']['n_layers'],
+                  dropout = config['model']['dropout'],
+                  lr = config['model']['lr'],
+                  exp_name=config['experiment_name'],
                   experiment_tracking=True)
 
-    X_data, y_data, _ = preprocess_dataset(config['dataset']['preprocess'])
+    # load tactile_data
+    file = config['dataset']['preprocess']['tactile_frames_per_sec']
+    X_data, y_data = torch.load(file)
+
     print(f"no_sequences:{len(X_data)}")
-    wb.init(project="testing")
+    print(config['dataset']['preprocess']['tactile_frames_per_sec'])
+    print(f"no_sequences:{len(X_data)}")
+    print(X_data.shape)
+    print(y_data.shape)
+
+    wb.init(project =config['wb_project_name'], name=config['experiment_name'], notes=config['notes'], dir='utils/wandb_runs',config=config)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
                                           monitor="val_acc",
@@ -70,10 +81,17 @@ def main(yaml_file):
                          deterministic=True,
                          num_sanity_val_steps=0,
                          accelerator="auto",
-                         num_nodes=1,
+                         num_nodes=1
 
                          )
-    train_loader, val_loader, test_loader = load_data(X_data, y_data, batch_size=config['train']['batch_size'])
+
+    single = config['dataset']['preprocess']['single']
+    clutter = config['dataset']['preprocess']['clutter']
+    batch_size = config['train']['batch_size']
+    train_loader, val_loader, test_loader = load_data(X_data, y_data,
+                                                      single=single,
+                                                      clutter=clutter,
+                                                      batch_size=batch_size)
     trainer.fit(model, train_loader, val_loader)
 
     ckpt_path = trainer.checkpoint_callback.last_model_path
