@@ -71,10 +71,12 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, X_data: [float], y_data: [int], single: bool, clutter: bool, batch_size: int = 1, ):
+    def __init__(self, X_data: [float], y_data: [int], single: bool, clutter: bool, batch_size: int = 1,
+                 seed: int = 42):
         self.batch_size = batch_size
         self.X_data = X_data
         self.y_data = y_data
+        self.seed = seed
         if single == True and clutter == False:
             train_size = 25
             test_size = 4
@@ -95,7 +97,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
         if stage is None or stage == 'fit':
             dataset = OpToForceDataset(self.X_data, self.y_data)
             self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size],
-                                                                 generator=torch.Generator().manual_seed(42))
+                                                                 generator=torch.Generator().manual_seed(self.seed))
 
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
@@ -138,16 +140,16 @@ class EnsembleVotingModel(pl.LightningModule):
         self.dropout = dropout
         self.lr = lr
 
+        self.num_channels = [n_hid] * n_levels
+        self.n_classes = 6
+
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.models = torch.nn.ModuleList(
-            [model_cls.load_from_checkpoint(p, n_features=self.n_features,
-                                            n_hid=self.n_hid,
-                                            n_levels=self.n_levels,
+            [model_cls.load_from_checkpoint(p, n_features=self.n_features, n_classes=self.n_classes,
+                                            num_channels_per_level=self.num_channels,
                                             kernel_size=self.kernel_size,
-                                            dropout=self.dropout,
-                                            lr=self.lr,
-                                            exp_name=wb_group_name) for p in checkpoint_paths])
+                                            dropout=self.dropout) for p in checkpoint_paths])
 
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
@@ -260,7 +262,8 @@ class EnsembleVotingModel(pl.LightningModule):
 
 class KFoldLoop(Loop):
     def __init__(self, num_folds: int, export_path: str, n_features: int, n_hid: int, n_levels: int,
-                 kernel_size:int, dropout: float, lr: float, project_name: str, experiment_name: str, config:dict) -> None:
+                 kernel_size: int, dropout: float, lr: float, project_name: str, experiment_name: str,
+                 config: dict) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
@@ -338,7 +341,7 @@ class KFoldLoop(Loop):
                                            , n_features=self.n_features,
                                            n_hid=self.n_hid,
                                            n_levels=self.n_levels,
-                                           kernel_size = self.kernel_size,
+                                           kernel_size=self.kernel_size,
                                            dropout=self.dropout,
                                            lr=self.lr,
                                            wb_project_name=self.project_name,

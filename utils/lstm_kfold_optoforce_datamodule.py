@@ -139,12 +139,7 @@ class EnsembleVotingModel(pl.LightningModule):
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.models = torch.nn.ModuleList(
-            [model_cls.load_from_checkpoint(p, n_features=self.n_features,
-                                            hidden_size=self.hidden_size,
-                                            n_layers=self.n_layers,
-                                            dropout=self.dropout,
-                                            lr=self.lr,
-                                            exp_name =wb_group_name ) for p in checkpoint_paths])
+            [model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
 
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
@@ -166,10 +161,11 @@ class EnsembleVotingModel(pl.LightningModule):
         logits_per_model = []
 
         for m in self.models:
-            logits = self._get_preds(m, X, y)
+            logits = self._get_preds(m, X)
             logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
+
         y = y[0][:].view(-1)  # shape = [max_seq_len]
 
         loss = self.loss_module(logits, y)
@@ -201,16 +197,9 @@ class EnsembleVotingModel(pl.LightningModule):
                               "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
                               "average_test_accuracy": accuracy_mean})
 
-    def _get_preds(self, model, X, y):
-        logits = model(X, y)
-
-        # logits: batch_size,max_seqlen-1,n_classes e.g.[1,194,6]
-        # y: batch_size,max_seqlen-1 e.g. [1,194]
-        logits_dim = logits.shape[-1]
-
-        logits = logits[0][:].view(-1, logits_dim)
-
-        # logits: max_seqlen-1,n_classes e.g.[193,6]
+    def _get_preds(self, model, X):
+        logits = model(X)
+        # logits: max_seqlen-1,n_classes e.g.[194,6]
 
         logits = logits.type_as(X)
         return logits

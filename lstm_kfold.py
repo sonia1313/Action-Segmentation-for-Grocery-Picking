@@ -61,10 +61,12 @@ def main(yaml_file):
     single = config['dataset']['preprocess']['single']
     clutter = config['dataset']['preprocess']['clutter']
     batch_size = config['train']['batch_size']
+    seed = config['seed']
     datamodule = OpToForceKFoldDataModule(X_data, y_data,
                                           single=single,
                                           clutter=clutter,
-                                          batch_size=batch_size)
+                                          batch_size=batch_size,
+                                          seed = seed)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
                                           monitor="val_acc",
