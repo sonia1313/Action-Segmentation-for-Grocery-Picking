@@ -1,7 +1,7 @@
 project_name: TCN_KFOLD
-experiment_name: tcn_testing2
+experiment_name: tcn_baseline_3
 main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
-notes: testing out tcn
+notes: testing baseline tcn, again
 seed: 42
 
 dataset:
@@ -29,6 +29,6 @@ model:
 train:
   checkpoint_path: logging
   batch_size: 1
-  epochs: 1 #20 #1 #15 #20 #20 #50 #3 #20 #20 #5 #20 #25
+  epochs: 20 #1 #15 #20 #20 #50 #3 #20 #20 #5 #20 #25
   n_kfolds: 5
   kfold_path: cross-validation/tcn_kfold
