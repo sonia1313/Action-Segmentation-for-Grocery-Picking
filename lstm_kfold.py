@@ -3,7 +3,7 @@ import os
 import pytorch_lightning as pl
 import importlib.util
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from utils.lstm_kfold_optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 from utils.tactile_preprocessing import preprocess_dataset
@@ -69,12 +69,12 @@ def main(yaml_file):
                                           seed = seed)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
-                                          monitor="val_acc",
-                                          mode="max",
+                                          monitor="val_los",
+                                          mode="min",
                                           filename=f"{config['experiment_name']}"'-{epoch:02d}-{val_loss:.2f}')
-
+    early_stopping = EarlyStopping(monitor="val_loss", mode="min", patience=5)
     trainer = pl.Trainer(default_root_dir=f"{config['train']['checkpoint_path']}/{config['experiment_name']}",
-                         callbacks=[checkpoint_callback],
+                         callbacks=[checkpoint_callback,early_stopping],
                          gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
@@ -90,7 +90,6 @@ def main(yaml_file):
                                  hidden_size=config['model']['n_hidden_units'],
                                  n_layers=config['model']['n_layers'],
                                  dropout=config['model']['dropout'],
-                                 lr=config['model']['lr'],
                                  project_name = config['project_name'],
                                  experiment_name=config['experiment_name'],
                                  config = config

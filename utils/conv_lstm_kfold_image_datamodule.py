@@ -99,7 +99,7 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
                                         transforms.ToTensor(),
                                         transforms.Normalize([0.48, 0.5, 0.48], [0.335, 0.335, 0.335])])
         if stage is None or stage == 'fit':
-            dataset = ImageDataset(self.dataset,transform=transform,size=self.size)
+            dataset = ImageDataset(self.dataset,transform=transform,size=self.img_size)
             self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size],
                                                                  generator=torch.Generator().manual_seed(self.seed))
 
@@ -115,10 +115,10 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
 
     def train_dataloader(self) -> DataLoader:
         # optoforce_train = DataLoader(self.optoforce_train, batch_size=1, shuffle=True)
-        return DataLoader(self.train_fold)
+        return DataLoader(self.train_fold,pin_memory=True)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_fold)
+        return DataLoader(self.val_fold,pin_memory=True)
 
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)

@@ -9,7 +9,7 @@ from utils.edit_distance import edit_score
 from utils.metrics_utils import _get_average_metrics
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
-from utils.preprocessing import remove_padding
+from utils.tactile_preprocessing import remove_padding
 
 
 class Chomp1d(nn.Module):
@@ -136,7 +136,8 @@ class LitTemporalConvNet(pl.LightningModule):
 
         logits = self(data)
 
-        y = y[0][:].view(-1)
+        #y = y[0][:].view(-1)
+        y = y.squeeze(0)
         loss = self.loss_module(logits, y)
 
         accuracy = self.train_acc(logits, y)
@@ -169,8 +170,8 @@ class LitTemporalConvNet(pl.LightningModule):
 
         logits = self(data)
 
-        y = y[0][:].view(-1)
-
+        #y = y[0][:].view(-1)
+        y = y.squeeze(0)
         loss = self.loss_module(logits, y)
 
         accuracy = self.val_acc(logits, y)
@@ -210,8 +211,8 @@ class LitTemporalConvNet(pl.LightningModule):
         data = torch.permute(X, (0, 2, 1))
         logits = self(data)
 
-        y = y[0][:].view(-1)
-
+        #y = y[0][:].view(-1)
+        y = y.squeeze(0)
         loss = self.loss_module(logits, y)
 
         accuracy = self.test_acc(logits, y)

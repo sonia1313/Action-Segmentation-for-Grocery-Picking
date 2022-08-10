@@ -8,14 +8,15 @@ from pytorch_lightning.loggers import wandb
 from torchmetrics import Accuracy, ConfusionMatrix
 
 from utils.edit_distance import edit_score
+from utils.metrics_utils import _get_average_metrics
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
-from utils.preprocessing import remove_padding
+from utils.tactile_preprocessing import remove_padding
 
 import wandb
 
 class ManyToManyLSTM(nn.Module):
-    def __init__(self, n_features, hidden_size, n_layers, n_classes=6):
+    def __init__(self, n_features, hidden_size, n_layers, dropout, n_classes=6):
         super().__init__()
 
         self.n_features = n_features
@@ -24,7 +25,7 @@ class ManyToManyLSTM(nn.Module):
         self.n_classes = n_classes
 
         self.lstm = nn.LSTM(input_size=self.n_features, hidden_size=self.hidden_size,
-                            num_layers=self.n_layers, batch_first=True)
+                            num_layers=self.n_layers, batch_first=True, dropout=dropout)
 
         self.linear = nn.Linear(in_features=self.hidden_size, out_features=self.n_classes)
 
@@ -60,10 +61,12 @@ class ManyToManyLSTM(nn.Module):
 
 class LitManyToManyLSTM(pl.LightningModule):
 
-    def __init__(self, n_features, hidden_size, n_layers, dropout, exp_name, experiment_tracking=True):
+    def __init__(self, n_features, hidden_size, n_layers, dropout, exp_name, lr, experiment_tracking=True):
         super().__init__()
         self.save_hyperparameters()
-        self.lstm = ManyToManyLSTM(n_features=n_features, hidden_size=hidden_size, n_layers=n_layers)
+        self.lstm = ManyToManyLSTM(n_features=n_features, hidden_size=hidden_size, n_layers=n_layers, dropout=dropout)
+        self.lr = lr
+
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.train_acc = Accuracy(ignore_index=-1, multiclass=True)
         self.val_acc = Accuracy(ignore_index=-1, multiclass=True)
@@ -81,7 +84,7 @@ class LitManyToManyLSTM(pl.LightningModule):
         return logits
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
 
         return optimizer
 
@@ -89,7 +92,8 @@ class LitManyToManyLSTM(pl.LightningModule):
         X, y = batch
 
         logits, loss = self._get_preds_and_loss(X, y)
-        y = y[0][:].view(-1)  # shape = [max_seq_len-1]
+        #y = y[0][:].view(-1)  # shape = [max_seq_len]
+        y = y.squeeze(0)
         accuracy = self.train_acc(logits, y)
         self.log('train_loss', loss, on_step=False, on_epoch=True)
 
@@ -119,8 +123,8 @@ class LitManyToManyLSTM(pl.LightningModule):
         self.val_counter += 1
         # print(self.val_counter)
         logits, val_loss = self._get_preds_and_loss(X, y)
-        y = y[0][:].view(-1)  # shape = [max_seq_len]
-
+        #y = y[0][:].view(-1)  # shape = [max_seq_len]
+        y = y.squeeze(0)
         accuracy = self.val_acc(logits, y)
 
         self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -161,14 +165,17 @@ class LitManyToManyLSTM(pl.LightningModule):
         # print(f"test:{self.test_counter}")
 
         logits, test_loss = self._get_preds_and_loss(X, y)
-        y = y[0][:].view(-1)  # shape = [max_seq_len]
-
+        #y = y[0][:].view(-1)  # shape = [max_seq_len]
+        y = y.squeeze(0)
         accuracy = self.test_acc(logits, y) 
 
         self.log("test_loss", test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
         preds, targets = remove_padding(logits, y)
+
+
+
         cm = self.confusion_matrix(preds, targets)
 
         f1_scores = f1_score(preds, targets)
@@ -221,25 +228,3 @@ class LitManyToManyLSTM(pl.LightningModule):
         return logits, loss
 
 
-def _get_average_metrics(outputs):
-    f1_10_outs = []
-    f1_25_outs = []
-    f1_50_outs = []
-    edit_outs = []
-    accuracy_outs = []
-    for i, out in enumerate(outputs):
-        a, e, f = out
-        f1_10_outs.append(f[0])
-        f1_25_outs.append(f[1])
-        f1_50_outs.append(f[2])
-
-        edit_outs.append(e)
-        accuracy_outs.append(a)
-
-    f1_10_mean = np.stack([x for x in f1_10_outs]).mean(0)
-    f1_25_mean = np.stack([x for x in f1_25_outs]).mean(0)
-    f1_50_mean = np.stack([x for x in f1_50_outs]).mean(0)
-    edit_mean = np.stack([x for x in edit_outs]).mean(0)
-    accuracy_mean = torch.mean(torch.stack([x for x in accuracy_outs]))
-
-    return f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean

@@ -3,12 +3,10 @@ import os
 import pytorch_lightning as pl
 import importlib.util
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from utils.optoforce_data_loader import load_data
-from utils.tactile_preprocessing import preprocess_dataset
 import wandb as wb
-from pytorch_lightning.loggers import WandbLogger
 import argparse
 
 CONFIG_PATH = "config"  # path from root folder
@@ -37,7 +35,8 @@ def main(yaml_file):
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # print(config['seed'])
     # print(type(config['seed']))
-    pl.seed_everything(config['seed'], workers=True)
+    seed = config['seed']
+    pl.seed_everything(seed, workers=True)
 
     n_gpu = 1 if torch.cuda.is_available() else 0
 
@@ -48,7 +47,7 @@ def main(yaml_file):
     model = _get_model(config['model']['module_name'], config['model']['script_path'], config['model']['pl_class_name'])
     # print(model)
     model = model(n_features=config['model']['n_features'],
-                  n_hid=config['model']['n_hidden_units'],
+                  n_hid=config['model']['n_hid'],
                   n_levels=config['model']['n_levels'],
                   kernel_size=config['model']['kernel_size'],
                   dropout=config['model']['dropout'],
@@ -70,12 +69,12 @@ def main(yaml_file):
     wb.init(project=config['project_name'], name=config['experiment_name'], notes=config['notes'], config=config)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
-                                          monitor="val_acc",
-                                          mode="max",
+                                          monitor="val_loss",
+                                          mode="min",
                                           filename=f"{config['experiment_name']}"'-{epoch:02d}-{val_loss:.2f}')
-
+    early_stopping = EarlyStopping(monitor="val_loss", mode="min", patience=5)
     trainer = pl.Trainer(default_root_dir=f"{config['train']['checkpoint_path']}/{config['experiment_name']}",
-                         callbacks=[checkpoint_callback],
+                         callbacks=[checkpoint_callback,early_stopping],
                          gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
@@ -91,7 +90,8 @@ def main(yaml_file):
     train_loader, val_loader, test_loader = load_data(X_data, y_data,
                                                       single=single,
                                                       clutter=clutter,
-                                                      batch_size=batch_size)
+                                                      batch_size=batch_size,
+                                                      seed = seed)
     trainer.fit(model, train_loader, val_loader)
 
     ckpt_path = trainer.checkpoint_callback.last_model_path

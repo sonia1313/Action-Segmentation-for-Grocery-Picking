@@ -53,7 +53,6 @@ def main(yaml_file):
                   kernel_size = config['model']['kernel_size'],
                   pool_size = config['model']['pool_size'],
                   lr = config['model']['lr'],
-                  stride = config['model']['stride'],
                   exp_name=config['experiment_name'])
 
     file = config['dataset']['preprocess']['image_frames_per_sec']
@@ -66,6 +65,7 @@ def main(yaml_file):
     batch_size = config['train']['batch_size']
     seed = config['seed']
     img_size = config['model']['img_size']
+    #print(img_size)
     datamodule = ImageKFoldDataModule(dataset=dataset,
                                       single=single,
                                       clutter=clutter,

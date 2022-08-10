@@ -3,7 +3,7 @@ import os
 import pytorch_lightning as pl
 import importlib.util
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from utils.optoforce_data_loader import load_data
 from utils.tactile_preprocessing import preprocess_dataset
@@ -39,7 +39,8 @@ def main(yaml_file):
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # print(config['seed'])
     # print(type(config['seed']))
-    pl.seed_everything(config['seed'], workers=True)
+    seed = config['seed']
+    pl.seed_everything(seed, workers=True)
 
     n_gpu = 1 if torch.cuda.is_available() else 0
 
@@ -67,15 +68,15 @@ def main(yaml_file):
     print(X_data.shape)
     print(y_data.shape)
 
-    wb.init(project =config['wb_project_name'], name=config['experiment_name'], notes=config['notes'], dir='utils/wandb_runs',config=config)
+    wb.init(project =config['project_name'], name=config['experiment_name'], notes=config['notes'], dir='utils/wandb_runs',config=config)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
-                                          monitor="val_acc",
-                                          mode="max",
+                                          monitor="val_loss",
+                                          mode="min",
                                           filename=f"{config['experiment_name']}"'-{epoch:02d}-{val_loss:.2f}')
-
+    early_stopping = EarlyStopping(monitor="val_loss", mode="min", patience=5)
     trainer = pl.Trainer(default_root_dir=f"{config['train']['checkpoint_path']}/{config['experiment_name']}",
-                         callbacks=[checkpoint_callback],
+                         callbacks=[checkpoint_callback,early_stopping],
                          gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
@@ -91,7 +92,8 @@ def main(yaml_file):
     train_loader, val_loader, test_loader = load_data(X_data, y_data,
                                                       single=single,
                                                       clutter=clutter,
-                                                      batch_size=batch_size)
+                                                      batch_size=batch_size,
+                                                      seed= seed)
     trainer.fit(model, train_loader, val_loader)
 
     ckpt_path = trainer.checkpoint_callback.last_model_path

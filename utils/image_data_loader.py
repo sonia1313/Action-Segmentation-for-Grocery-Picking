@@ -21,9 +21,9 @@ class ImageDataset(Dataset):
 
     def __getitem__(self, seq_idx):
         seq_df = self.frames_per_seq[seq_idx]
-
+        print(self.size)
         images_in_seq = torch.zeros(size=(len(seq_df), 3, self.size, self.size))  # nchannel, h, w
-        actions_in_seq = torch.zeros(size=(len(seq_df),))
+        actions_in_seq = torch.zeros(size=(len(seq_df),),dtype=torch.long)
         # env_in_seq = []
         # fruit_in_seq = []
 
@@ -75,8 +75,8 @@ def load_data(files, single, clutter, size=32, seed=42, batch_size=1):
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size],
                                                             generator=torch.Generator().manual_seed(seed))
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     return train_loader, val_loader, test_loader

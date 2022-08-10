@@ -1,6 +1,6 @@
 """
 Author - Sonia Mathews
-lstm_kfold_optoforce_datamodule.py
+tcn_kfold_optoforce_datamodule.py
 
 This script has been adapted by the author from:
 https://github.com/Lightning-AI/lightning/blob/master/examples/pl_loops/kfold.py
@@ -111,10 +111,10 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 
     def train_dataloader(self) -> DataLoader:
         # optoforce_train = DataLoader(self.optoforce_train, batch_size=1, shuffle=True)
-        return DataLoader(self.train_fold)
+        return DataLoader(self.train_fold,pin_memory=True)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_fold)
+        return DataLoader(self.val_fold,pin_memory=True)
 
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)
@@ -130,7 +130,7 @@ class EnsembleVotingModel(pl.LightningModule):
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
                  n_features: int, n_hid: int, n_levels: int, kernel_size: int,
                  dropout: float,
-                 lr: float,
+
                  stride:int,
                  wb_project_name: str,
                  wb_group_name: str) -> None:
@@ -141,7 +141,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.n_levels = n_levels
         self.kernel_size = kernel_size
         self.dropout = dropout
-        self.lr = lr
+        #self.lr = lr
         self.stride = stride
 
         self.num_channels = [n_hid] * n_levels
@@ -182,8 +182,8 @@ class EnsembleVotingModel(pl.LightningModule):
         #     logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
-        y = y[0][:].view(-1)  # shape = [max_seq_len]
-
+        #y = y[0][:].view(-1)  # shape = [max_seq_len]
+        y = y.squeeze(0)
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
         self.log("ensemble_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -213,29 +213,6 @@ class EnsembleVotingModel(pl.LightningModule):
                               "e_average_test_f1_50": f1_50_mean, "e_average_test_edit": edit_mean,
                               "e_average_test_accuracy": accuracy_mean})
 
-    # def _get_average_metrics(self, outputs):
-    #
-    #     f1_10_outs = []
-    #     f1_25_outs = []
-    #     f1_50_outs = []
-    #     edit_outs = []
-    #     accuracy_outs = []
-    #     for i, out in enumerate(outputs):
-    #         a, e, f = out
-    #         f1_10_outs.append(f[0])
-    #         f1_25_outs.append(f[1])
-    #         f1_50_outs.append(f[2])
-    #
-    #         edit_outs.append(e)
-    #         accuracy_outs.append(a)
-    #
-    #     f1_10_mean = np.stack([x for x in f1_10_outs]).mean(0)
-    #     f1_25_mean = np.stack([x for x in f1_25_outs]).mean(0)
-    #     f1_50_mean = np.stack([x for x in f1_50_outs]).mean(0)
-    #     edit_mean = np.stack([x for x in edit_outs]).mean(0)
-    #     accuracy_mean = torch.mean(torch.stack([x for x in accuracy_outs]))
-    #
-    #     return f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean
 
 
 #############################################################################################
@@ -267,7 +244,7 @@ class EnsembleVotingModel(pl.LightningModule):
 
 class KFoldLoop(Loop):
     def __init__(self, num_folds: int, export_path: str, n_features: int, n_hid: int, n_levels: int,
-                 kernel_size: int, dropout: float, lr: float, project_name: str, experiment_name: str,
+                 kernel_size: int, dropout: float, project_name: str, experiment_name: str,
                  config: dict, stride:int = 1) -> None:
         super().__init__()
         self.num_folds = num_folds
@@ -279,7 +256,7 @@ class KFoldLoop(Loop):
         self.n_levels = n_levels
         self.kernel_size = kernel_size
         self.dropout = dropout
-        self.lr = lr
+        #self.lr = lr
         self.stride = stride
 
         # experiment tracking meta info
@@ -350,7 +327,7 @@ class KFoldLoop(Loop):
                                            n_levels=self.n_levels,
                                            kernel_size=self.kernel_size,
                                            dropout=self.dropout,
-                                           lr=self.lr,
+
                                            stride=self.stride,
                                            wb_project_name=self.project_name,
                                            wb_group_name=self.experiment_name)

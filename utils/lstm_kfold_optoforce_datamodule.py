@@ -109,10 +109,10 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 
     def train_dataloader(self) -> DataLoader:
         # optoforce_train = DataLoader(self.optoforce_train, batch_size=1, shuffle=True)
-        return DataLoader(self.train_fold)
+        return DataLoader(self.train_fold,pin_memory=True)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_fold)
+        return DataLoader(self.val_fold,pin_memory=True)
 
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)
@@ -126,7 +126,7 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 n_features: int, hidden_size: int, n_layers: int, dropout: float, lr: float, wb_project_name: str,
+                 n_features: int, hidden_size: int, n_layers: int, dropout: float, wb_project_name: str,
                  wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
@@ -134,12 +134,14 @@ class EnsembleVotingModel(pl.LightningModule):
         self.hidden_size = hidden_size
         self.n_layers = n_layers
         self.dropout = dropout
-        self.lr = lr
 
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.models = torch.nn.ModuleList(
-            [model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
+            [model_cls.load_from_checkpoint(p,n_features=self.n_features,
+                                            hidden_size= self.hidden_size,
+                                            n_layers=self.n_layers,
+                                            dropout=self.dropout) for p in checkpoint_paths])
 
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
@@ -166,8 +168,8 @@ class EnsembleVotingModel(pl.LightningModule):
 
         logits = torch.stack(logits_per_model).mean(0)
 
-        y = y[0][:].view(-1)  # shape = [max_seq_len]
-
+        #y = y[0][:].view(-1)  # shape = [max_seq_len]
+        y = y.squeeze(0)
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
         self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -204,30 +206,6 @@ class EnsembleVotingModel(pl.LightningModule):
         logits = logits.type_as(X)
         return logits
 
-    # def _get_average_metrics(self, outputs):
-    #
-    #     f1_10_outs = []
-    #     f1_25_outs = []
-    #     f1_50_outs = []
-    #     edit_outs = []
-    #     accuracy_outs = []
-    #     for i, out in enumerate(outputs):
-    #         a, e, f = out
-    #         f1_10_outs.append(f[0])
-    #         f1_25_outs.append(f[1])
-    #         f1_50_outs.append(f[2])
-    #
-    #         edit_outs.append(e)
-    #         accuracy_outs.append(a)
-    #
-    #     f1_10_mean = np.stack([x for x in f1_10_outs]).mean(0)
-    #     f1_25_mean = np.stack([x for x in f1_25_outs]).mean(0)
-    #     f1_50_mean = np.stack([x for x in f1_50_outs]).mean(0)
-    #     edit_mean = np.stack([x for x in edit_outs]).mean(0)
-    #     accuracy_mean = torch.mean(torch.stack([x for x in accuracy_outs]))
-    #
-    #     return f1_10_mean, f1_25_mean, f1_50_mean, edit_mean, accuracy_mean
-
 
 #############################################################################################
 #                           Step 4 / 5: Implement the  KFoldLoop                            #
@@ -258,7 +236,7 @@ class EnsembleVotingModel(pl.LightningModule):
 
 class KFoldLoop(Loop):
     def __init__(self, num_folds: int, export_path: str, n_features: int, hidden_size: int, n_layers: int,
-                 dropout: float, lr: float, project_name:str, experiment_name:str, config:dict) -> None:
+                 dropout: float, project_name:str, experiment_name:str, config:dict) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
@@ -268,7 +246,6 @@ class KFoldLoop(Loop):
         self.hidden_size = hidden_size
         self.n_layers = n_layers
         self.dropout = dropout
-        self.lr = lr
 
         #experiment tracking meta info
         self.project_name = project_name
