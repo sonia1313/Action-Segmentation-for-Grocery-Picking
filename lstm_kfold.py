@@ -6,7 +6,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from utils.lstm_kfold_optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
-from utils.preprocessing import preprocess_dataset
+from utils.tactile_preprocessing import preprocess_dataset
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse

@@ -21,10 +21,10 @@ def get_files(path, clutter=True, single=False):
     # files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
     # labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
 
-    if clutter == True and single == False:
+    if clutter is True and single is False:
         files = glob.glob(f"{path}/*/clutter/[0-9]*/optoforce_data.csv")
         labels = glob.glob(f"{path}/*/clutter/[0-9]*/labels")
-    elif single == True and clutter == False:
+    elif single is True and clutter is False:
         files = glob.glob(f"{path}/*/single/[0-9]*/optoforce_data.csv")
         labels = glob.glob(f"{path}/*/single/[0-9]*/labels")
     else:

@@ -6,7 +6,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from utils.optoforce_data_loader import load_data
-from utils.preprocessing import preprocess_dataset
+from utils.tactile_preprocessing import preprocess_dataset
 import wandb as wb
 from pytorch_lightning.loggers import WandbLogger
 import argparse
@@ -46,17 +46,28 @@ def main(yaml_file):
         print(torch.cuda.get_device_properties(device).name)
 
     model = _get_model(config['model']['module_name'], config['model']['script_path'], config['model']['pl_class_name'])
-    print(model)
+    # print(model)
     model = model(n_features=config['model']['n_features'],
                   n_hid=config['model']['n_hidden_units'],
                   n_levels=config['model']['n_levels'],
                   kernel_size=config['model']['kernel_size'],
                   dropout=config['model']['dropout'],
-                  lr=config['model']['lr'])
+                  lr=config['model']['lr'],
+                  stride = config['model']['stride'],
+                  exp_name=config['experiment_name'],
+                  experiment_tracking = False )
 
-    X_data, y_data, _ = preprocess_dataset(config['dataset']['preprocess'])
+    #load tactile_data
+    file = config['dataset']['preprocess']['tactile_frames_per_sec']
+    X_data, y_data = torch.load(file)
+
+    #X_data, y_data, _ = preprocess_dataset(config['dataset']['preprocess'])
+    #sanity check
+    print(config['dataset']['preprocess']['tactile_frames_per_sec'])
     print(f"no_sequences:{len(X_data)}")
-    #wb.init(project=config['wb_project_name'], name=config['experiment_name'], notes=config['notes'], config=config)
+    print(X_data.shape)
+    print(y_data.shape)
+    wb.init(project=config['project_name'], name=config['experiment_name'], notes=config['notes'], config=config)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
                                           monitor="val_acc",
@@ -85,7 +96,7 @@ def main(yaml_file):
 
     ckpt_path = trainer.checkpoint_callback.last_model_path
     print(ckpt_path)
-    #trainer.test(dataloaders=test_loader, ckpt_path=ckpt_path)
+    trainer.test(dataloaders=test_loader, ckpt_path=ckpt_path)
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ from utils.metrics_utils import _get_average_metrics
 from utils.optoforce_data_loader import OpToForceDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
-from utils.preprocessing import *
+from utils.tactile_preprocessing import *
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass

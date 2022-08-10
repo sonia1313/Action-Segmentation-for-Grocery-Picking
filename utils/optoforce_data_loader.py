@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, random_split, Subset
 from torchvision.datasets import VisionDataset
 
-from utils.preprocessing import *
+from utils.tactile_preprocessing import *
 #torch.manual_seed(42)
 
 class OpToForceDataset(Dataset):
@@ -54,16 +54,3 @@ def load_data(x_data, y_data, single, clutter, seed, batch_size=1):
     return train_loader, val_loader, test_loader
 
 
-class ImageDataset(VisionDataset):
-
-    def __init__(self, sequences, actions):
-        """
-        :param sequences: [[img_frames_seq_1][img_frames_seq_2].....[imag_frames_seq_n]]
-        :param actions: [[actions_per_frame_seq_1]..[actions_per_frame_seq_2]....[actions_per_frame_seq_n]]
-        """
-
-    def __getitem__(self, item):
-        pass
-
-    def __len__(self):
-        pass

@@ -6,7 +6,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from utils.optoforce_data_loader import load_data
-from utils.preprocessing import preprocess_dataset
+from utils.tactile_preprocessing import preprocess_dataset
 import wandb as wb
 from pytorch_lightning.loggers import WandbLogger
 import argparse

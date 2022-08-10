@@ -21,7 +21,7 @@ from utils.metrics_utils import _get_average_metrics
 from utils.optoforce_data_loader import OpToForceDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
-from utils.preprocessing import *
+from utils.tactile_preprocessing import *
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
@@ -128,7 +128,10 @@ class OpToForceKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 n_features: int, n_hid: int, n_levels: int, kernel_size: int, dropout: float, lr: float,
+                 n_features: int, n_hid: int, n_levels: int, kernel_size: int,
+                 dropout: float,
+                 lr: float,
+                 stride:int,
                  wb_project_name: str,
                  wb_group_name: str) -> None:
         super().__init__()
@@ -139,6 +142,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.kernel_size = kernel_size
         self.dropout = dropout
         self.lr = lr
+        self.stride = stride
 
         self.num_channels = [n_hid] * n_levels
         self.n_classes = 6
@@ -149,7 +153,8 @@ class EnsembleVotingModel(pl.LightningModule):
             [model_cls.load_from_checkpoint(p, n_features=self.n_features, n_classes=self.n_classes,
                                             num_channels_per_level=self.num_channels,
                                             kernel_size=self.kernel_size,
-                                            dropout=self.dropout) for p in checkpoint_paths])
+                                            dropout=self.dropout,
+                                            stride = self.stride) for p in checkpoint_paths])
 
         self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
@@ -159,7 +164,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.experiment_name = wb_group_name
 
         self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
-                                      job_type='test', dir='wandb_runs')
+                                      job_type='test')
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
@@ -181,8 +186,8 @@ class EnsembleVotingModel(pl.LightningModule):
 
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("ensemble_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("ensemble_test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
         preds, targets = remove_padding(logits, y)
 
@@ -192,7 +197,7 @@ class EnsembleVotingModel(pl.LightningModule):
         f1_scores = f1_score(preds, targets)
         edit = edit_score(preds, targets)
 
-        self.wb_ensemble.log({"test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
+        self.wb_ensemble.log({"e_test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
         return accuracy, edit, f1_scores
 
     def test_epoch_end(self, outputs):
@@ -204,9 +209,9 @@ class EnsembleVotingModel(pl.LightningModule):
         print(f"average test edit: {edit_mean}")
         print(f"average test accuracy : {accuracy_mean}")
 
-        self.wb_ensemble.log({"average_test_f1_10": f1_10_mean, "average_test_f1_25": f1_25_mean,
-                              "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
-                              "average_test_accuracy": accuracy_mean})
+        self.wb_ensemble.log({"e_average_test_f1_10": f1_10_mean, "e_average_test_f1_25": f1_25_mean,
+                              "e_average_test_f1_50": f1_50_mean, "e_average_test_edit": edit_mean,
+                              "e_average_test_accuracy": accuracy_mean})
 
     # def _get_average_metrics(self, outputs):
     #
@@ -263,7 +268,7 @@ class EnsembleVotingModel(pl.LightningModule):
 class KFoldLoop(Loop):
     def __init__(self, num_folds: int, export_path: str, n_features: int, n_hid: int, n_levels: int,
                  kernel_size: int, dropout: float, lr: float, project_name: str, experiment_name: str,
-                 config: dict) -> None:
+                 config: dict, stride:int = 1) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
@@ -275,6 +280,7 @@ class KFoldLoop(Loop):
         self.kernel_size = kernel_size
         self.dropout = dropout
         self.lr = lr
+        self.stride = stride
 
         # experiment tracking meta info
         self.project_name = project_name
@@ -300,11 +306,12 @@ class KFoldLoop(Loop):
 
     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
-        print(f"STARTING FOLD {self.current_fold}")
 
         self.wb_run = wandb.init(reinit=True, project=self.project_name,
-                                 group=self.experiment_name, job_type='cross-val',
-                                 id=f'current_fold_{self.current_fold}', dir='wandb_runs', config=self.config)
+                                 group=self.experiment_name, job_type='cross-val', config=self.config)
+        print(f"STARTING FOLD {self.current_fold}")
+
+
 
         # tracking gradients and hyperparameters
         self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
@@ -344,6 +351,7 @@ class KFoldLoop(Loop):
                                            kernel_size=self.kernel_size,
                                            dropout=self.dropout,
                                            lr=self.lr,
+                                           stride=self.stride,
                                            wb_project_name=self.project_name,
                                            wb_group_name=self.experiment_name)
         voting_model.trainer = self.trainer

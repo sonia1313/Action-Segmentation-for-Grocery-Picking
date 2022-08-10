@@ -6,7 +6,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from utils.tcn_kfold_optoforce_datamodule  import OpToForceKFoldDataModule, KFoldLoop
-from utils.preprocessing import preprocess_dataset
+from utils.tactile_preprocessing import preprocess_dataset
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse
@@ -52,6 +52,7 @@ def main(yaml_file):
                   kernel_size = config['model']['kernel_size'],
                   dropout=config['model']['dropout'],
                   lr=config['model']['lr'],
+                  stride = config['model']['stride'],
                   exp_name=config['experiment_name'])
 
     file = config['dataset']['preprocess']['tactile_frames_per_sec']
