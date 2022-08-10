@@ -11,7 +11,7 @@ import torch
 import pickle
 
 
-from utils.preprocessing import encode_labels, pad_data, standardise_features, normalize_features
+from utils.tactile_preprocessing import encode_labels, pad_data, standardise_features, normalize_features
 
 # preprocess_config = {
 #     'data_path': 'dataset',  # get_files()
