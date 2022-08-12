@@ -314,7 +314,6 @@ class KFoldLoop(Loop):
                                            hidden_size=self.hidden_size,
                                            n_layers=self.n_layers,
                                            dropout=self.dropout,
-                                           lr=self.lr,
                                            wb_project_name=self.project_name,
                                            wb_group_name=self.experiment_name)
         voting_model.trainer = self.trainer

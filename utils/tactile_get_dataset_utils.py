@@ -2,8 +2,9 @@
 Author - Sonia Mathews
 tactile_get_dataset_utils.py
 
-Script to create datasets to pass to OpToForceDataset() class
-to improve efficiency during experimentation
+Script to create datasets composed of tensors
+to pass to OpToForceDataset() class
+Improve efficiency during experimentation
 """
 import os
 
@@ -28,20 +29,20 @@ def get_dataset():
     print(os.getcwd())
     #3fps_clutter_single
 
-    with open('data/tactile/with_feature_engineering/3fps/3fps_clutter_tactile_df.pkl', 'rb') as f:
-        clutter_dfs = pickle.load(f)
+    with open('data/tactile/with_feature_engineering/3fps/3fps_single_tactile_df.pkl', 'rb') as f:
+        single_dfs = pickle.load(f)
         # print(len(frames))
-        print(clutter_dfs[0].head())
-        actions_per_seq, label_to_index_map = encode_labels(clutter_dfs)
+        print(single_dfs[0].head())
+        actions_per_seq, label_to_index_map = encode_labels(single_dfs)
 
-        X_data, y_data = pad_data(clutter_dfs, actions_per_seq, n_sequences= len(clutter_dfs), features=['index','middle','thumb'])
+        X_data, y_data = pad_data(single_dfs, actions_per_seq, n_sequences= len(single_dfs), features=['index','middle','thumb'])
 
     print(type(X_data))
     print(type(y_data))
     print(f"no_sequences:{len(X_data)}")
 
-    torch.save((X_data,y_data), 'data/tactile/with_feature_engineering/3fps/clutter_3fps_dataset.pt')
-    X, y = torch.load('data/tactile/with_feature_engineering/3fps/clutter_3fps_dataset.pt')
+    torch.save((X_data,y_data), 'data/tactile/with_feature_engineering/3fps/single_3fps_dataset.pt')
+    X, y = torch.load('data/tactile/with_feature_engineering/3fps/single_3fps_dataset.pt')
     print(X.shape)
     print(y.shape)
     print(X[0])

@@ -1,6 +1,4 @@
-import torch
 from torch.utils.data import Dataset, DataLoader, random_split, Subset
-from torchvision.datasets import VisionDataset
 
 from utils.tactile_preprocessing import *
 #torch.manual_seed(42)

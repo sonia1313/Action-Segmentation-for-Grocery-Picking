@@ -180,7 +180,7 @@ def remove_padding(predictions_padded, targets_padded):
 
     n = len([out for out in mask.squeeze() if out.all() >= 1])
     # print(n)
-    outputs = predictions_padded.squeeze()[:n, :]  # (unpadded_seq_len-1,6) e.g ([120,6])
+    outputs = predictions_padded.squeeze()[:n, :]  # (unpadded_seq_len,6) e.g ([121,6])
     # print(f"unpadded outputs {outputs.shape}")
 
     targets_padded = targets_padded.squeeze()
