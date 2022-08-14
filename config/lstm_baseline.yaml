@@ -1,36 +1,31 @@
-experiment_name: Encoder Decoder LSTM
+project_name: LSTM_KFOLD_Clutter_Report
+experiment_name: test_1
 main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
-
+notes: testing many to many lstm on clutter dataset
 seed: 42
-device: ['cpu', 'cuda']
+
 dataset:
   preprocess:
-    data_path: dataset
-    frames_per_sec: 1 #15 #84
-    standardise_data: True
-    feature_engineering: True
-    n_features: 3
-    features: [index, middle, thumb]
-    n_sequences: 30
+    clutter: True #get_files()
+    single: False #get_files()
+    tactile_frames_per_sec: data/tactile/with_feature_engineering/5fps/clutter_5fps_dataset_tensors.pt #directly loads dataset from data/tactile
+    frames_per_sec: 5
 
 model:
-  module_name: lstm
+  module_name: many_to_many_lstm
   pl_class_name : LitManyToManyLSTM
   script_path: models/lstm.py
-  n_layers: 1
+  #set n_features according to preprocess dataset conditions
+    #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
   n_features: 3
-  n_hidden_units: 100
+  n_hidden_units: 75
+  n_layers: 3
+  dropout: 0.1
+  lr: 0.001
 
 train:
-  checkpoint_path: train/lightning_logs/checkpoints
+  checkpoint_path: logging
   batch_size: 1
-  epochs: 10
-  gpus: 0
-  k_fold_path: cross-validation/lstm_kfold
-  n_k_folds: 5
-
-test:
-  checkpoint_path: train/lightning_logs/checkpoints
-
-
-
+  epochs:  10
+  n_kfolds: 5
+  kfold_path: cross-validation/lstm_kfold

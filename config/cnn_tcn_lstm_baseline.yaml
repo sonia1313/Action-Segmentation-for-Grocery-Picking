@@ -1,14 +1,14 @@
-project_name: CNN_TCN_LSTM_KFOLD_Clutter_Report
-experiment_name: test_1
+project_name: CNN_TCN_LSTM_KFOLD_Single_Report
+experiment_name: testing_hidden_2
 main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
 notes:
 seed: 42
 dataset:
   preprocess:
-    clutter: True #get_files()
-    single: False #get_files()
+    clutter: False #get_files()
+    single: True #get_files()
     fps: 5
-    mm_frames_per_sec: data/multimodal/5fps/5fs_clutter_dataset_tensors.pt #directly loads dataset from data/tactile
+    mm_frames_per_sec: data/multimodal/5fps/5fs_single_dataset_tensors.pt #directly loads dataset from data/tactile
 
 model:
   module_name: cnn_tcn_lstm
