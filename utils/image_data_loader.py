@@ -5,18 +5,19 @@ from utils.tactile_preprocessing import *
 
 
 class ImageDataset(Dataset):
-    def __init__(self, sequences, actions):
+    def __init__(self, sequences, actions,fruits_per_seq,env_per_seq):
         self.X = sequences
         self.y = actions
+        self.fruit_seqs = fruits_per_seq
+        self.env_seq = env_per_seq
 
     def __len__(self):
         return self.X.shape[0]
 
     def __getitem__(self, item):
-        return self.X[item], self.y[item]
+        return self.X[item], self.y[item], self.fruit_seqs[item]
 
-
-def load_data(x_data, y_data, single, clutter, size=32, seed=42, batch_size=1):
+def load_data(x_data, y_data, single, clutter, seed=42, batch_size=1):
     # train_size = int(0.6 * len(x_data))
     # val_size, test_size = int(0.2 * len(x_data)), int(0.2 * len(x_data))
     if single is True and clutter is False:

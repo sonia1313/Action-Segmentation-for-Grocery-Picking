@@ -3,10 +3,9 @@ import os
 import pytorch_lightning as pl
 import importlib.util
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint
 
-from utils.tcn_kfold_optoforce_datamodule  import OpToForceKFoldDataModule, KFoldLoop
-from utils.tactile_preprocessing import preprocess_dataset
+from utils.kfold_datamodule.tcn_kfold_optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse
@@ -71,12 +70,12 @@ def main(yaml_file):
                                           seed=seed)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
-                                          monitor="val_loss",
-                                          mode="min",
+                                          monitor="val_acc",
+                                          mode="max",
                                           filename=f"{config['experiment_name']}"'-{epoch:02d}-{val_loss:.2f}')
-    early_stopping = EarlyStopping(monitor="val_loss", mode="min", patience=5)
+
     trainer = pl.Trainer(default_root_dir=f"{config['train']['checkpoint_path']}/{config['experiment_name']}",
-                         callbacks=[checkpoint_callback,early_stopping],
+                         callbacks=[checkpoint_callback],
                          gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,
@@ -93,7 +92,7 @@ def main(yaml_file):
                                  n_levels=config['model']['n_levels'],
                                  kernel_size=config['model']['kernel_size'],
                                  dropout=config['model']['dropout'],
-
+                                 lr=config['model']['lr'],
                                  project_name = config['project_name'],
                                  experiment_name=config['experiment_name'],
                                  config = config,

@@ -5,7 +5,7 @@ import importlib.util
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from utils.kfold_datamodule.cnn_tcn_kfold_image_datamodule import ImageKFoldDataModule, KFoldLoop
+from utils.kfold_datamodule.cnn_tcn_lstm_kfold_image_datamodule import MultiModalKFoldDataModule, KFoldLoop
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse
@@ -44,33 +44,37 @@ def main(yaml_file):
         print(torch.cuda.get_device_properties(device).name)
 
     model = _get_model(config['model']['module_name'], config['model']['script_path'], config['model']['pl_class_name'])
-    model = model( cnn_input_channels=config['model']['cnn_input_channels'],
-                   cnn_kernel_size=config['model']['cnn_kernel_size'],
-                   tcn_kernel_size=config['model']['tcn_kernel_size'],
-                   tcn_levels=config['model']['tcn_levels'],
-                   tcn_dropout=config['model']['tcn_dropout'],
-                   tcn_nhid=config['model']['tcn_nhid'],
-                   lr=config['model']['lr'],
-                   exp_name=config['experiment_name'])
+    model = model(lstm_n_features=config['model']['lstm_n_features'],
+                  lstm_nhid=config['model']['lstm_nhid'],
+                  lstm_nlayers=config['model']['lstm_nlayers'],
+                  lstm_dropout=config['model']['lstm_dropout'],
+                  cnn_kernel_size=config['model']['cnn_kernel_size'],
+                  tcn_kernel_size=config['model']['tcn_kernel_size'],
+                  tcn_levels=config['model']['tcn_levels'],
+                  tcn_dropout=config['model']['tcn_dropout'],
+                  tcn_nhid=config['model']['tcn_nhid'],
+                  lr=config['model']['lr'],
+                  exp_name=config['experiment_name'])
 
     single = config['dataset']['preprocess']['single']
     clutter = config['dataset']['preprocess']['clutter']
     batch_size = config['train']['batch_size']
     seed = config['seed']
-    filename = config['dataset']['preprocess']['image_frames_per_sec']
-    X, y, fruits, env = torch.load(filename)
+    filename = config['dataset']['preprocess']['mm_frames_per_sec']
+    image_data, tactile_data, y, fruits, env = torch.load(filename)
 
-    print(f"no_sequences:{len(X)}")
+    print(f"no_sequences:{len(image_data)}")
 
     # print(img_size)
-    datamodule = ImageKFoldDataModule(x_data=X,
-                                      y_data=y,
-                                      fruits_per_seq=fruits,
-                                      env_per_seq=env,
-                                      single=single,
-                                      clutter=clutter,
-                                      batch_size=batch_size,
-                                      seed=seed)
+    datamodule = MultiModalKFoldDataModule(image_data=image_data,
+                                           tactile_data=tactile_data,
+                                           y_data=y,
+                                           fruits_per_seq=fruits,
+                                           env_per_seq=env,
+                                           single=single,
+                                           clutter=clutter,
+                                           batch_size=batch_size,
+                                           seed=seed)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
                                           monitor="val_loss",

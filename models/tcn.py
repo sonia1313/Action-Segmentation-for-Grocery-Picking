@@ -1,3 +1,6 @@
+""""
+Author - Sonia Mathews
+"""
 import torch
 import torch.nn as nn
 import wandb
@@ -80,7 +83,7 @@ class TemporalConvNet(nn.Module):
 
         logits = self.linear(x)  # logits shape: seq_len x n_classes
 
-        return logits
+        return logits, x
 
 
 class LitTemporalConvNet(pl.LightningModule):
@@ -120,7 +123,7 @@ class LitTemporalConvNet(pl.LightningModule):
         self.experiment_name = exp_name
 
     def forward(self, x):
-        logits = self.tcn(x)
+        logits,_ = self.tcn(x)
 
         return logits
 

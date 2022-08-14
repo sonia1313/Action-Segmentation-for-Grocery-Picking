@@ -1,6 +1,6 @@
 """
 Author - Sonia Mathews
-cnn_lstm_kfold_image_datamodule.py
+cnn_tcn_lstm_kfold_image_datamodule.py
 
 This script has been adapted by the author from:
 https://github.com/Lightning-AI/lightning/blob/master/examples/pl_loops/kfold.py
@@ -16,11 +16,10 @@ from torch.utils.data import DataLoader, random_split, Dataset, Subset
 from torchmetrics import Accuracy, ConfusionMatrix
 import os.path as osp
 
-
 from utils.edit_distance import edit_score
 from utils.image_preprocessing import remove_padding_img
 from utils.metrics_utils import _get_average_metrics, _get_preds_and_labels
-from utils.image_data_loader import ImageDataset
+from utils.multimodal_data_loader import MMDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
 from abc import ABC, abstractmethod
@@ -66,15 +65,17 @@ class BaseKFoldDataModule(pl.LightningDataModule, ABC):
 #############################################################################################
 
 @dataclass
-class ImageKFoldDataModule(BaseKFoldDataModule):
+class MultiModalKFoldDataModule(BaseKFoldDataModule):
     train_dataset: Optional[Dataset] = None
     test_dataset: Optional[Dataset] = None
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, x_data:[],y_data:[],fruits_per_seq:[],env_per_seq:[], single: bool, clutter: bool, seed:int, batch_size: int = 1):
+    def __init__(self, image_data: [], tactile_data: [], y_data: [], fruits_per_seq: [], env_per_seq: [], single: bool,
+                 clutter: bool, seed: int, batch_size: int = 1):
         self.batch_size = batch_size
-        self.x_data = x_data
+        self.image_data = image_data
+        self.tactile_data = tactile_data
         self.y_data = y_data
         self.fruits_per_seq = fruits_per_seq
         self.env_per_seq = env_per_seq
@@ -96,14 +97,14 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
         self._log_hyperparams = True
         self.seed = seed
 
-
-
     def setup(self, stage: Optional[str] = None) -> None:
 
         if stage is None or stage == 'fit':
-            dataset = ImageDataset(sequences=self.x_data,actions=self.y_data,
-                                   fruits_per_seq=self.fruits_per_seq,
-                                   env_per_seq=self.env_per_seq)
+            dataset = MMDataset(img_seqs=self.image_data,
+                                tactile_seqs=self.tactile_data,
+                                action_seqs=self.y_data,
+                                fruits_per_seq=self.fruits_per_seq,
+                                env_per_seq=self.env_per_seq)
             self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size],
                                                                  generator=torch.Generator().manual_seed(self.seed))
 
@@ -119,10 +120,10 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
 
     def train_dataloader(self) -> DataLoader:
         # optoforce_train = DataLoader(self.optoforce_train, batch_size=1, shuffle=True)
-        return DataLoader(self.train_fold,pin_memory=True)
+        return DataLoader(self.train_fold, pin_memory=True)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_fold,pin_memory=True)
+        return DataLoader(self.val_fold, pin_memory=True)
 
     def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset)
@@ -136,7 +137,7 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 wb_project_name: str,wb_group_name: str) -> None:
+                 wb_project_name: str, wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
         # self.cnn_input_channels = cnn_input_channels,
@@ -149,7 +150,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.models = torch.nn.ModuleList(
             [model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
 
-        self.acc = Accuracy(ignore_index=-1,multiclass=True)
+        self.acc = Accuracy(ignore_index=-1, multiclass=True)
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
 
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
@@ -162,20 +163,21 @@ class EnsembleVotingModel(pl.LightningModule):
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
-        X, y,fruit = batch
-        self.counter += 1
-        c_in = X.flatten(start_dim=0, end_dim=1)
-        # print(f"test_step_from ensemble: {X[0]}")
+        image_x, tactile_x, y, fruit = batch
 
-        logits_per_model = [m(c_in)for m in self.models]
+        cnn_in = image_x.flatten(start_dim=0, end_dim=1)
+        lstm_in = tactile_x
 
+        #action_logits = self(tactile_data=lstm_in, image_data=cnn_in)
+
+        logits_per_model = [m(tactile_data=lstm_in, image_data=cnn_in) for m in self.models]
 
         logits = torch.stack(logits_per_model).mean(0)
 
-        #y = y[0][:].view(-1)  # shape = [max_seq_len]
+        # y = y[0][:].view(-1)  # shape = [max_seq_len]
         y = y.squeeze(0)
-        #print("shape of y")
-        #print(y.shape)
+        # print("shape of y")
+        # print(y.shape)
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
         self.log("ensemble_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -191,7 +193,7 @@ class EnsembleVotingModel(pl.LightningModule):
 
         self.wb_ensemble.log({"e_test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
 
-        #saving for analysis
+        # saving for analysis
         preds_, targets_ = _get_preds_and_labels(preds, targets)
         torch.save(f=f"test_preds_numpy/{self.wb_project_name}_{self.experiment_name}_{self.counter}.pt",
                    obj=(preds_, targets_))
@@ -240,20 +242,18 @@ class EnsembleVotingModel(pl.LightningModule):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, num_folds: int, export_path: str,project_name:str,
-                 experiment_name:str,
-                 config:dict) -> None:
+    def __init__(self, num_folds: int, export_path: str, project_name: str,
+                 experiment_name: str,
+                 config: dict) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
         self.export_path = export_path
 
-
-        #experiment tracking meta info
+        # experiment tracking meta info
         self.project_name = project_name
         self.experiment_name = experiment_name
         self.config = config
-
 
     @property
     def done(self) -> bool:
@@ -281,8 +281,6 @@ class KFoldLoop(Loop):
         # tracking gradients and hyperparameters
         self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
         print(f"STARTING FOLD {self.current_fold}")
-
-
 
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
         self.trainer.datamodule.setup_fold_index(self.current_fold)

@@ -5,7 +5,7 @@ import importlib.util
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from utils.kfold_datamodule.cnn_lstm_kfold_image_datamodule import ImageKFoldDataModule, KFoldLoop
+from utils.kfold_datamodule.cnn_tcn_kfold_image_datamodule import ImageKFoldDataModule, KFoldLoop
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse
@@ -46,9 +46,10 @@ def main(yaml_file):
     model = _get_model(config['model']['module_name'], config['model']['script_path'], config['model']['pl_class_name'])
     model = model( cnn_input_channels=config['model']['cnn_input_channels'],
                    cnn_kernel_size=config['model']['cnn_kernel_size'],
-                   lstm_nlayers=config['model']['lstm_nlayers'],
-                   lstm_dropout=config['model']['lstm_dropout'],
-                   lstm_nhid=config['model']['lstm_nhid'],
+                   tcn_kernel_size=config['model']['tcn_kernel_size'],
+                   tcn_levels=config['model']['tcn_levels'],
+                   tcn_dropout=config['model']['tcn_dropout'],
+                   tcn_nhid=config['model']['tcn_nhid'],
                    lr=config['model']['lr'],
                    exp_name=config['experiment_name'])
 
@@ -90,11 +91,6 @@ def main(yaml_file):
     internal_fit_loop = trainer.fit_loop
     trainer.fit_loop = KFoldLoop(num_folds=config['train']['n_kfolds'],
                                  export_path=config['train']['kfold_path'],
-                                 cnn_input_channels=config['model']['cnn_input_channels'],
-                                 cnn_kernel_size=config['model']['cnn_kernel_size'],
-                                 lstm_layers=config['model']['lstm_nlayers'],
-                                 lstm_dropout=config['model']['lstm_dropout'],
-                                 lstm_hid=config['model']['lstm_nhid'],
                                  project_name=config['project_name'],
                                  experiment_name=config['experiment_name'],
                                  config=config,

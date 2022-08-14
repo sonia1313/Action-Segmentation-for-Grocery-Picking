@@ -1,4 +1,3 @@
-
 import os
 import pickle
 
@@ -94,3 +93,15 @@ def remove_padding_img(predictions_padded, targets_padded):
     targets = targets_padded[:n]
 
     return outputs, targets
+
+
+# used for multimodal learning
+def get_tactile_tensors(sequences):
+    tactile_tensors_per_seq = []
+    features = ['index', 'middle', 'thumb']
+    for seq_df in sequences:
+        tactile_seq = torch.zeros((len(seq_df), 3))
+        for i in range(0, len(seq_df)):
+            tactile_seq[i] = torch.tensor(seq_df[features].iloc[i])
+        tactile_tensors_per_seq.append(tactile_seq)
+    return tactile_tensors_per_seq

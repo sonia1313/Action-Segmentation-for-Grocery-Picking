@@ -17,7 +17,7 @@ from torchmetrics import Accuracy, ConfusionMatrix
 import os.path as osp
 
 from utils.edit_distance import edit_score
-from utils.metrics_utils import _get_average_metrics
+from utils.metrics_utils import _get_average_metrics, _get_preds_and_labels
 from utils.optoforce_data_loader import OpToForceDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
@@ -162,7 +162,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
         self.counter = 0
         self.experiment_name = wb_group_name
-
+        self.wb_project_name = wb_project_name
         self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
                                       job_type='test')
 
@@ -197,7 +197,13 @@ class EnsembleVotingModel(pl.LightningModule):
         f1_scores = f1_score(preds, targets)
         edit = edit_score(preds, targets)
 
-        self.wb_ensemble.log({"e_test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
+        self.wb_ensemble.log({"e_test_loss": loss, "e_test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
+        #saving for analysis
+
+
+        preds_,targets_ = _get_preds_and_labels(preds,targets)
+        torch.save(f=f"test_preds_numpy/{self.wb_project_name}_{self.experiment_name}_{self.counter}.pt",obj=(preds_,targets_))
+
         return accuracy, edit, f1_scores
 
     def test_epoch_end(self, outputs):
@@ -286,12 +292,13 @@ class KFoldLoop(Loop):
 
         self.wb_run = wandb.init(reinit=True, project=self.project_name,
                                  group=self.experiment_name, job_type='cross-val', config=self.config)
+
+        # tracking gradients and hyperparameters
+        self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
         print(f"STARTING FOLD {self.current_fold}")
 
 
 
-        # tracking gradients and hyperparameters
-        self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
 
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
         self.trainer.datamodule.setup_fold_index(self.current_fold)

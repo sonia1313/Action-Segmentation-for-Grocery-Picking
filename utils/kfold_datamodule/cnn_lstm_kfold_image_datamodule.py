@@ -19,7 +19,7 @@ import os.path as osp
 
 from utils.edit_distance import edit_score
 from utils.image_preprocessing import remove_padding_img
-from utils.metrics_utils import _get_average_metrics
+from utils.metrics_utils import _get_average_metrics, _get_preds_and_labels
 from utils.image_data_loader import ImageDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
@@ -161,7 +161,7 @@ class EnsembleVotingModel(pl.LightningModule):
         self.wb_project_name = wb_project_name
 
         self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
-                                      job_type='test', dir='wandb_runs')
+                                      job_type='test')
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
@@ -190,8 +190,8 @@ class EnsembleVotingModel(pl.LightningModule):
         #print(y.shape)
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("ensemble_test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("ensemble_test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
         preds, targets = remove_padding_img(logits, y)
 
@@ -201,13 +201,13 @@ class EnsembleVotingModel(pl.LightningModule):
         f1_scores = f1_score(preds, targets)
         edit = edit_score(preds, targets)
 
-        self.wb_ensemble.log({"test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
+        self.wb_ensemble.log({"e_test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
 
         #saving for analysis
-        _,preds_max = preds.max(dim=1)
-        preds_max = preds_max.cpu()
-        targets_ = targets.detach().cpu()
-        torch.save(f=f"test_preds_numpy/{self.wb_project_name}_{self.experiment_name}_{self.counter}.pt",obj=(preds_max,targets_))
+        preds_, targets_ = _get_preds_and_labels(preds, targets)
+        torch.save(f=f"test_preds_numpy/{self.wb_project_name}_{self.experiment_name}_{self.counter}.pt",
+                   obj=(preds_, targets_))
+
         return accuracy, edit, f1_scores
 
     def test_epoch_end(self, outputs):
@@ -219,9 +219,9 @@ class EnsembleVotingModel(pl.LightningModule):
         print(f"average test edit: {edit_mean}")
         print(f"average test accuracy : {accuracy_mean}")
 
-        self.wb_ensemble.log({"average_test_f1_10": f1_10_mean, "average_test_f1_25": f1_25_mean,
-                              "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
-                              "average_test_accuracy": accuracy_mean})
+        self.wb_ensemble.log({"e_average_test_f1_10": f1_10_mean, "e_average_test_f1_25": f1_25_mean,
+                              "e_average_test_f1_50": f1_50_mean, "e_average_test_edit": edit_mean,
+                              "e_average_test_accuracy": accuracy_mean})
 
     def _get_preds(self, model, X):
         logits = model(X)

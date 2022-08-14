@@ -3,11 +3,9 @@ import os
 import pytorch_lightning as pl
 import importlib.util
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint
 
-from utils.cnn_lstm_kfold_image_datamodule import ImageKFoldDataModule, KFoldLoop
-from utils.image_preprocessing import load_files, _downsample
-from utils.tactile_preprocessing import preprocess_dataset
+from utils.kfold_datamodule.cnn_lstm_kfold_image_datamodule import ImageKFoldDataModule, KFoldLoop
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse

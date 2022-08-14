@@ -5,8 +5,7 @@ import importlib.util
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
-from utils.lstm_kfold_optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
-from utils.tactile_preprocessing import preprocess_dataset
+from utils.kfold_datamodule.lstm_kfold_optoforce_datamodule import OpToForceKFoldDataModule, KFoldLoop
 # import wandb
 # from pytorch_lightning.loggers import WandbLogger
 import argparse
@@ -69,12 +68,12 @@ def main(yaml_file):
                                           seed = seed)
 
     checkpoint_callback = ModelCheckpoint(save_last=True,
-                                          monitor="val_los",
+                                          monitor="val_loss",
                                           mode="min",
                                           filename=f"{config['experiment_name']}"'-{epoch:02d}-{val_loss:.2f}')
     early_stopping = EarlyStopping(monitor="val_loss", mode="min", patience=5)
     trainer = pl.Trainer(default_root_dir=f"{config['train']['checkpoint_path']}/{config['experiment_name']}",
-                         callbacks=[checkpoint_callback,early_stopping],
+                         callbacks=[checkpoint_callback],
                          gpus=n_gpu,
                          max_epochs=config['train']['epochs'],
                          deterministic=True,

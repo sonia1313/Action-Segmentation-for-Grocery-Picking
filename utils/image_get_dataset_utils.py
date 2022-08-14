@@ -1,7 +1,4 @@
 """"
-Author - Sonia Mathews
-image_get_dataset_utils.py
-
 Script to create datasets composed of tensors, to then
 pass to ImageDataset() class.
 Improves efficiency during experimentation
@@ -17,10 +14,10 @@ def get_image_dataset(single:bool, clutter:bool):
     os.chdir("C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project")
 
     if single:
-        img_dfs = torch.load('data/image/3fps/single_dataset_3fps.pt')
+        img_dfs = torch.load('data/image/5fps/single_dataset_5fps.pt')
         print(len(img_dfs))
     elif clutter:
-        img_dfs = torch.load('data/image/3fps/clutter_dataset_3fps.pt')
+        img_dfs = torch.load('data/image/5fps/clutter_dataset_5fps.pt')
         print(len(img_dfs))
     else:
         print("state either single(T/F) or clutter(T/F) only")
@@ -39,12 +36,12 @@ def save_data():
     padded_img_tensors, padded_label_tensors, fruits_per_seq, env_per_seq = get_image_dataset(single=True,clutter=False)
 
     torch.save((padded_img_tensors, padded_label_tensors, fruits_per_seq, env_per_seq),
-               'data/image/3fps/3fs_single_dataset_tensors.pt')
+               'data/image/5fps/5fs_single_dataset_tensors.pt')
 
     padded_img_tensors, padded_label_tensors, fruits_per_seq, env_per_seq = get_image_dataset(single=False,clutter=True)
 
     torch.save((padded_img_tensors, padded_label_tensors, fruits_per_seq, env_per_seq),
-               'data/image/3fps/3fs_clutter_dataset_tensors.pt')
+               'data/image/5fps/5fs_clutter_dataset_tensors.pt')
 
 if __name__ == '__main__':
     save_data()
