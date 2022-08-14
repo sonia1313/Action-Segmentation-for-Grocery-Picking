@@ -1,0 +1,31 @@
+project_name: CONV_LSTM_KFOLD
+experiment_name: debugging_1
+main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
+notes:
+seed: 42
+dataset:
+  preprocess:
+    clutter: True #get_files()
+    single: False #get_files()
+    image_frames_per_sec: data/image/3fps/clutter_dataset_3fps.pt #directly loads dataset from data/tactile
+
+model:
+  module_name: conv_lstm
+  pl_class_name : LitManyToManyConvLSTM
+  script_path: models/conv_lstm.py
+  #set n_features according to preprocess dataset conditions
+    #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
+  img_size: 25
+  input_dim: 3
+  n_hid: 30
+  n_layers: 1
+  kernel_size: 5
+  pool_size: 2
+  lr: 0.001
+
+train:
+  checkpoint_path: logging
+  batch_size: 1
+  epochs: 1
+  n_kfolds: 5
+  kfold_path: cross-validation/conv_lstm_kfold

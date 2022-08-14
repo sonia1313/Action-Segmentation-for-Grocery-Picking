@@ -1,35 +1,35 @@
 """
 Author - Sonia Mathews
-conv_lstm_kfold_image_datamodule.py
+cnn_lstm_kfold_image_datamodule.py
 
 This script has been adapted by the author from:
 https://github.com/Lightning-AI/lightning/blob/master/examples/pl_loops/kfold.py
 to perfom KFold cross validation for the dataset used in this project.
 (And to perform experiment tracking on Weights and Biases)
 """
-
+import numpy
 import pytorch_lightning as pl
 from pytorch_lightning.loops import FitLoop, Loop
+import torch
 from torch import nn
 from torch.utils.data import DataLoader, random_split, Dataset, Subset
 from torchmetrics import Accuracy, ConfusionMatrix
 import os.path as osp
 
-from torchvision import transforms
 
 from utils.edit_distance import edit_score
+from utils.image_preprocessing import remove_padding_img
 from utils.metrics_utils import _get_average_metrics
 from utils.image_data_loader import ImageDataset
 from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
-from utils.tactile_preprocessing import *
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type
 from pytorch_lightning.trainer.states import TrainerFn
 from sklearn.model_selection import KFold
-
+import numpy as np
 import wandb
 
 
@@ -72,9 +72,13 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
     train_fold: Optional[Dataset] = None
     val_fold: Optional[Dataset] = None
 
-    def __init__(self, dataset:[], single: bool, clutter: bool, seed:int, img_size:int, batch_size: int = 1):
+    def __init__(self, x_data:[],y_data:[],fruits_per_seq:[],env_per_seq:[], single: bool, clutter: bool, seed:int, batch_size: int = 1):
         self.batch_size = batch_size
-        self.dataset = dataset
+        self.x_data = x_data
+        self.y_data = y_data
+        self.fruits_per_seq = fruits_per_seq
+        self.env_per_seq = env_per_seq
+
         if single is True and clutter is False:
             train_size = 25
             test_size = 4
@@ -92,14 +96,14 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
         self._log_hyperparams = True
         self.seed = seed
 
-        self.img_size = img_size
+
 
     def setup(self, stage: Optional[str] = None) -> None:
-        transform = transforms.Compose([transforms.Resize((self.img_size, self.img_size)),
-                                        transforms.ToTensor(),
-                                        transforms.Normalize([0.48, 0.5, 0.48], [0.335, 0.335, 0.335])])
+
         if stage is None or stage == 'fit':
-            dataset = ImageDataset(self.dataset,transform=transform,size=self.img_size)
+            dataset = ImageDataset(sequences=self.x_data,actions=self.y_data,
+                                   fruits_per_seq=self.fruits_per_seq,
+                                   env_per_seq=self.env_per_seq)
             self.train_dataset, self.test_dataset = random_split(dataset, [self.train_size, self.test_size],
                                                                  generator=torch.Generator().manual_seed(self.seed))
 
@@ -132,71 +136,78 @@ class ImageKFoldDataModule(BaseKFoldDataModule):
 class EnsembleVotingModel(pl.LightningModule):
 
     def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str],
-                 img_size: int, input_dim: int , hidden_dim: int, n_layers: int, kernel_size:int, pool_size :int, wb_project_name: str,
-                 wb_group_name: str) -> None:
+                 cnn_input_channels,lstm_dropout,cnn_kernel_size, lstm_hid,
+                 lstm_layers, wb_project_name: str,wb_group_name: str) -> None:
         super().__init__()
         # Create `num_folds` models with their associated fold weights
-        self.img_size = img_size
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.pool_size = pool_size
-
+        self.cnn_input_channels = cnn_input_channels,
+        self.lstm_dropout = lstm_dropout,
+        self.cnn_kernel_size = cnn_kernel_size,
+        self.lstm_hid = lstm_hid,
+        self.lstm_layers = lstm_layers
         # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         self.models = torch.nn.ModuleList(
             [model_cls.load_from_checkpoint(p,
-                                            img_size = self.img_size,
-                                            input_dim = self.input_dim,
-                                            hidden_dim = self.hidden_dim,
-                                            n_layers = self.n_layers,
-                                            kernel_size = self.kernel_size,
-                                            pool_size = self.pool_size ) for p in checkpoint_paths])
 
-        self.acc = Accuracy(multiclass=True)
-        self.loss_module = nn.CrossEntropyLoss()
+                                          ) for p in checkpoint_paths])
+
+        self.acc = Accuracy(ignore_index=-1,multiclass=True)
+        self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
 
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
         self.counter = 0
         self.experiment_name = wb_group_name
+        self.wb_project_name = wb_project_name
 
         self.wb_ensemble = wandb.init(project=wb_project_name, group=self.experiment_name,
                                       job_type='test', dir='wandb_runs')
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         # Compute the averaged predictions over the `num_folds` models.
-        X, y = batch
+        X, y,fruit = batch
         self.counter += 1
-
+        c_in = X.flatten(start_dim=0, end_dim=1)
         # print(f"test_step_from ensemble: {X[0]}")
 
-        logits_per_model = []
+        logits_per_model = [m(c_in)for m in self.models]
 
-        for m in self.models:
-            logits, _ = m(X)
-            logits_per_model.append(logits)
+        # for m in self.models:
+        #     logits, *z = m(c_in)
+        #     print(z)
+        #     print("---------------------------")
+        #     print("logits")
+        #     print(logits)
+        #     break
+
+            #logits_per_model.append(logits)
 
         logits = torch.stack(logits_per_model).mean(0)
 
         #y = y[0][:].view(-1)  # shape = [max_seq_len]
         y = y.squeeze(0)
-        print("shape of y")
-        print(y.shape)
+        #print("shape of y")
+        #print(y.shape)
         loss = self.loss_module(logits, y)
         accuracy = self.acc(logits, y)
         self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test_acc", accuracy, on_step=False, on_epoch=True, prog_bar=True)
 
-        #preds, targets = remove_padding(logits, y)
+        preds, targets = remove_padding_img(logits, y)
 
-        cm = self.confusion_matrix(logits, y)
+        cm = self.confusion_matrix(preds, targets)
         fig = _plot_cm(cm, path=f"ensemble_cm_figs/{self.experiment_name}-ensemble-cm-{self.counter}.png")
 
-        f1_scores = f1_score(logits, y)
-        edit = edit_score(logits, y)
+        f1_scores = f1_score(preds, targets)
+        edit = edit_score(preds, targets)
 
         self.wb_ensemble.log({"test_loss": loss, "test_acc": accuracy, "ensemble_confusion_matrix": wandb.Image(fig)})
+
+        #saving for analysis
+        _,preds_max = preds.max(dim=1)
+        preds_max = preds_max.cpu()
+        targets_ = targets.detach().cpu()
+        torch.save(f=f"test_preds_numpy/{self.wb_project_name}_{self.experiment_name}_{self.counter}.pt",obj=(preds_max,targets_))
         return accuracy, edit, f1_scores
 
     def test_epoch_end(self, outputs):
@@ -249,21 +260,22 @@ class EnsembleVotingModel(pl.LightningModule):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, num_folds: int, export_path: str, img_size: int,
-                 input_dim: int , hidden_dim: int, n_layers: int,
-                 kernel_size:int, pool_size :int, project_name:str, experiment_name:str, config:dict) -> None:
+    def __init__(self, num_folds: int, export_path: str,
+                 cnn_input_channels:int, lstm_dropout:float,
+                 cnn_kernel_size:int, lstm_hid:int,
+                 lstm_layers:int,project_name:str,
+                 experiment_name:str,
+                 config:dict) -> None:
         super().__init__()
         self.num_folds = num_folds
         self.current_fold: int = 0
         self.export_path = export_path
 
-        self.img_size = img_size
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.pool_size = pool_size
-
+        self.cnn_input_channels = cnn_input_channels
+        self.lstm_dropout = lstm_dropout
+        self.cnn_kernel_size = cnn_kernel_size
+        self.lstm_hid = lstm_hid
+        self.lstm_layers = lstm_layers
 
         #experiment tracking meta info
         self.project_name = project_name
@@ -290,14 +302,15 @@ class KFoldLoop(Loop):
 
     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
-        print(f"STARTING FOLD {self.current_fold}")
-
         self.wb_run = wandb.init(reinit=True, project=self.project_name,
                                  group=self.experiment_name, job_type='cross-val',
-                                 id=f'current_fold_{self.current_fold}', config=self.config)
+                                 config=self.config)
 
         # tracking gradients and hyperparameters
         self.wb_run.watch(self.trainer.model, log='all', log_freq=1)
+        print(f"STARTING FOLD {self.current_fold}")
+
+
 
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
         self.trainer.datamodule.setup_fold_index(self.current_fold)
@@ -327,12 +340,12 @@ class KFoldLoop(Loop):
         """Used to compute the performance of the ensemble model on the test set."""
         checkpoint_paths = [osp.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
         voting_model = EnsembleVotingModel(type(self.trainer.lightning_module),
-                                           checkpoint_paths,                                            img_size = self.img_size,
-                                            input_dim = self.input_dim,
-                                            hidden_dim = self.hidden_dim,
-                                            n_layers = self.n_layers,
-                                            kernel_size = self.kernel_size,
-                                            pool_size = self.pool_size,
+                                           checkpoint_paths,
+                                           cnn_input_channels=self.cnn_input_channels,
+                                           lstm_dropout=self.lstm_dropout,
+                                           cnn_kernel_size=self.cnn_kernel_size,
+                                           lstm_hid=self.lstm_hid,
+                                           lstm_layers=self.lstm_layers,
                                            wb_project_name=self.project_name,
                                            wb_group_name=self.experiment_name)
         voting_model.trainer = self.trainer

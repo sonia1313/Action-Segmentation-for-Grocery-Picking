@@ -1,0 +1,33 @@
+project_name: CNN_TCN_KFOLD_Clutter_Report
+experiment_name: test_2
+main_dir: C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project
+notes:
+seed: 42
+dataset:
+  preprocess:
+    clutter: True #get_files()
+    single: False #get_files()
+    fps: 5
+    image_frames_per_sec: data/image/5fps/5fs_clutter_dataset_tensors.pt #directly loads dataset from data/tactile
+
+model:
+  module_name: cnn_tcn
+  pl_class_name : LitCNN_TCN
+  script_path: models/cnn_tcn.py
+  #set n_features according to preprocess dataset conditions
+    #i.e. default is 3 (features = [index,thumb,middle] when feature engineering = True)
+  img_size: 32
+  cnn_input_channels: 3
+  cnn_kernel_size: 3
+  tcn_nhid: 75
+  tcn_levels: 8
+  tcn_kernel_size: 8
+  tcn_dropout: 0.1
+  lr: 0.0001
+
+train:
+  checkpoint_path: logging
+  batch_size: 1
+  epochs: 10
+  n_kfolds: 5
+  kfold_path: cross-validation/cnn_tcn_kfold

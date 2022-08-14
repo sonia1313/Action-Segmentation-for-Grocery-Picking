@@ -1,6 +1,6 @@
 """
 Author - Sonia Mathews
-cnn_lstm.py
+cnn_tcn_lstm.py
 """
 import torch
 import torch.nn as nn
@@ -8,6 +8,7 @@ import wandb
 import pytorch_lightning as pl
 from torchmetrics import Accuracy, ConfusionMatrix
 
+from models.cnn_tcn import CNN_TCN
 from models.lstm import ManyToManyLSTM
 from utils.edit_distance import edit_score
 from utils.image_preprocessing import remove_padding_img
@@ -16,96 +17,72 @@ from utils.overlap_f1_metric import f1_score
 from utils.plot_confusion_matrix import _plot_cm
 
 
-class CNN(nn.Module):
-    def __init__(self, kernel_size,input_channels = 3,):
+class LitMM_CNN_TCN_LSTM(pl.LightningModule):
+    def __init__(self, lr, lstm_n_features, lstm_nhid, lstm_nlayers, lstm_dropout, cnn_kernel_size, tcn_nhid,
+                 tcn_levels, tcn_kernel_size, tcn_dropout, exp_name, experiment_tracking = True, n_classes=6):
         super().__init__()
-        self.kernel_size = kernel_size
-        #print(kernel_size[0])
-        self.padding = kernel_size // 2
-        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=8, kernel_size=self.kernel_size, padding=self.padding)
-        self.relu = nn.ReLU()
+        # self.tcn_num_channels = [tcn_hid] * tcn_levels
+        self.cnn_tcn = CNN_TCN(cnn_kernel_size=cnn_kernel_size,
+                               tcn_hid=tcn_nhid,
+                               tcn_levels=tcn_levels,
+                               tcn_kernel_size=tcn_kernel_size,
+                               tcn_dropout=tcn_dropout
+                               )
+       # print(lstm_dropout)
+        self.lstm = ManyToManyLSTM(n_features=lstm_n_features,
+                                   hidden_size=lstm_nhid,
+                                   n_layers=lstm_nlayers,
+                                   dropout=lstm_dropout)
 
-        self.max_pool = nn.MaxPool2d(kernel_size=2)
+        combined_in_features = lstm_nhid + tcn_nhid
+        self.action_fc1 = nn.Linear(in_features=combined_in_features, out_features=n_classes)
 
-        self.conv2 = nn.Conv2d(in_channels=8, out_channels=16, kernel_size=self.kernel_size, padding=self.padding)
-        self.conv3 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=self.kernel_size, padding=self.padding)
-
-
-    def forward(self, x):
-        x = self.max_pool(self.relu(self.conv1(x)))
-        x = self.max_pool(self.relu(self.conv2(x)))
-
-        x = self.max_pool(self.relu(self.conv3(x)))  # x out shape: L x C x H X W
-
-        x = x.flatten(start_dim=1)
-
-        return x
-
-class CNN_LSTM(nn.Module):
-    def __init__(self,cnn_input_channels,lstm_dropout,cnn_kernel_size=3, lstm_hid=50,
-                 lstm_layers=2):
-        super().__init__()
-
-        self.cnn = CNN(input_channels=cnn_input_channels,
-                       kernel_size=cnn_kernel_size)  # input: B*LxCxHxW output:LxH
-        self.lstm = self.lstm = ManyToManyLSTM(n_features=512, hidden_size=lstm_hid,
-                                               n_layers=lstm_layers, dropout=lstm_dropout,n_classes=6) #input: B X L X H
-
-    def forward(self,x):
-        cnn_outs = self.cnn(x) #cnn_outs: L x H
-        lstm_in = cnn_outs.unsqueeze(0)
-
-        logits,frames = self.lstm(lstm_in) #logits shape L x n_classes
-
-        return logits,frames
-
-
-
-class LitCNN_LSTM(pl.LightningModule):
-    def __init__(self,exp_name,lr, cnn_input_channels,lstm_dropout,cnn_kernel_size=3, lstm_nhid=50,
-                 lstm_nlayers=1,experiment_tracking=True,  n_classes=6):
-        super().__init__()
-
-        self.cnn_lstm = CNN_LSTM(cnn_input_channels=cnn_input_channels,
-                                 cnn_kernel_size=cnn_kernel_size,
-                                 lstm_dropout=lstm_dropout,
-                                 lstm_layers=lstm_nlayers,
-                                 lstm_hid=lstm_nhid
-                                 )
-        self.n_classes = n_classes
         self.save_hyperparameters()
         self.lr = lr
         self.loss_module = nn.CrossEntropyLoss(ignore_index=-1)
         self.train_acc = Accuracy(ignore_index=-1, multiclass=True)
         self.val_acc = Accuracy(ignore_index=-1, multiclass=True)
         self.test_acc = Accuracy(ignore_index=-1, multiclass=True)
-        self.experiment_tracking = experiment_tracking
+
         self.test_counter = 0
         self.val_counter = 0
         self.confusion_matrix = ConfusionMatrix(num_classes=6)
+
         self.experiment_name = exp_name
+        self.experiment_tracking = experiment_tracking
 
-    def forward(self, x):
-        logits,_ = self.cnn_lstm(x)
+    def forward(self, tactile_data, image_data):
+        _, lstm_hidden = self.lstm(tactile_data)
+        _, cnn_tcn_hidden = self.cnn_tcn(image_data)
+        # print(lstm_hidden.shape)
+        # print(lstm_hidden.shape)
 
-        return logits
+        combined_hidden = torch.concat((cnn_tcn_hidden, lstm_hidden), dim=1)  # image and tactile data combined
+        # print(combined_hidden.shape)
+        # last_combined_hidden = combined_hidden[-1:] #last timestep
+        # print(last_combined_hidden.shape)
+
+        action_logits = self.action_fc1(combined_hidden)
+        return action_logits
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
 
         return optimizer
 
-
     def training_step(self, batch, batch_idx):
-        X, y,fruit = batch
+        image_x, tactile_x, y, fruit = batch
 
-        c_in = X.flatten(start_dim=0, end_dim=1)
+        cnn_in = image_x.flatten(start_dim=0, end_dim=1)
+        lstm_in = tactile_x
 
-        logits = self(c_in)
-
+        logits = self(tactile_data=lstm_in, image_data=cnn_in)
 
         y = y.squeeze(0)
+        #print(action_logits.shape)
+        #print(y.shape)
         loss = self.loss_module(logits, y)
+
 
         accuracy = self.train_acc(logits, y)
 
@@ -131,13 +108,13 @@ class LitCNN_LSTM(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        X, y,fruit = batch
+        image_x, tactile_x, y, fruit = batch
 
-        c_in = X.flatten(start_dim=0, end_dim=1)
+        cnn_in = image_x.flatten(start_dim=0, end_dim=1)
+        lstm_in = tactile_x
+        logits = self(tactile_data=lstm_in, image_data=cnn_in)
 
-        logits = self(c_in)
-
-        #y = y[0][:].view(-1)
+        # y = y[0][:].view(-1)
         y = y.squeeze(0)
         loss = self.loss_module(logits, y)
 
@@ -173,12 +150,13 @@ class LitCNN_LSTM(pl.LightningModule):
                        "average_val_accuracy": accuracy_mean})
 
     def test_step(self, batch, batch_idx):
-        X, y,fruit= batch
+        image_x, tactile_x, y, fruit = batch
 
-        c_in = X.flatten(start_dim=0, end_dim=1)
-        logits = self(c_in)
+        cnn_in = image_x.flatten(start_dim=0, end_dim=1)
+        lstm_in = tactile_x
+        logits = self(tactile_data=lstm_in, image_data=cnn_in)
 
-        #y = y[0][:].view(-1)
+        # y = y[0][:].view(-1)
         y = y.squeeze(0)
         loss = self.loss_module(logits, y)
 
@@ -218,32 +196,26 @@ class LitCNN_LSTM(pl.LightningModule):
                        "average_test_f1_50": f1_50_mean, "average_test_edit": edit_mean,
                        "average_test_accuracy": accuracy_mean})
 
-
 # def main():
-#     # model = CNN()
-#     # batch_size = 1
-#     # time_steps = 100
-#     # n_channels = 3
-#     # size = 32
-#     # dummy_x = torch.rand(batch_size,time_steps,n_channels,size,size)
-#     # c_in = dummy_x.view(1*100,3,32,32)
-#     # print(c_in.shape)
-#     # x = model(c_in)
-#     # print(x.shape)
 #
 #     # ----testing-cnn-lstm
 #
-#     model = LitCNN_LSTM(exp_name=None,lstm_layers=1,lstm_dropout=0.0,lr=0.001)
+#     model = LitMM_CNN_TCN_LSTM(lr=0.0,lstm_n_features=3,lstm_nhid=75,lstm_nlayers=1,
+#                                lstm_dropout=0.0,
+#                                cnn_kernel_size=3,tcn_nhid=75,tcn_levels=1,
+#                                tcn_kernel_size=4,tcn_dropout=0.0)
 #     batch_size = 1
 #     time_steps = 100
 #     n_channels = 3
 #     size = 32
-#     dummy_x = torch.rand(batch_size, time_steps, n_channels, size, size)
-#     c_in = dummy_x.flatten(start_dim=0, end_dim=1)
-#     print("input to cnn")
-#     print(c_in.shape)
-#     logits = model(c_in)
-#     print(logits.shape)
+#     dummy_image_x = torch.rand(batch_size, time_steps, n_channels, size, size)
+#     cnn_in = dummy_image_x.flatten(start_dim=0, end_dim=1)
+#
+#     dummy_tactile_x = torch.rand(batch_size,time_steps,n_channels)
+#     lstm_in = dummy_tactile_x
+#     action_logits, fruit_logits = model(tactile_data=lstm_in, image_data=cnn_in)
+#     print(action_logits.shape)
+#
 #
 #
 #
