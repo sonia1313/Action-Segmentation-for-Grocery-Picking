@@ -33,6 +33,7 @@ All experiments run in Google Colab:
 Note:
 - The accuracy metrics implemented in thhis project uses source code from the study [Temporal Convolutional Networks for Action Segmentation and Detection](https://github.com/colincsl/TemporalConvolutionalNetworks/tree/master/code).
 - The Temporal Convolution Network (TCN) used in this project uses source code provided from the study [An Empirical Evaluation of Generic Convolutional and Recurrent Networks for Sequence Modeling](https://github.com/locuslab/TCN/tree/master/TCN).
+- The dataset used in this project can downloaded from [CRISP Teleoperated Fruit Picking Dataset](https://github.com/ARQ-CRISP/CRISP_teleoperated_fruit_picking_dataset).
 
 
 
