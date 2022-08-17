@@ -8,7 +8,7 @@ All Experiments are done in PyTorch and Pytorch Lightning.
 This project contains the following files and folders
 
 [config/](https://github.com/sonia1313/Action-Segmentation-for-Grocery-Picking/tree/master/config) contains baseline configurations for each implemented model.\
-[cross-validation/](https://github.com/sonia1313/Action-Segmentation-for-Grocery-Picking/tree/master/cross-validation) contains weights a models during kfold cross validation, used to ensemble the models and take the avargae predictions on a separate test dataset.\
+[cross-validation/](https://github.com/sonia1313/Action-Segmentation-for-Grocery-Picking/tree/master/cross-validation) contains weights a models during kfold cross validation, used to ensemble the models and take the average predictions on a separate test dataset.\
 [models/](https://github.com/sonia1313/Action-Segmentation-for-Grocery-Picking/tree/master/models) contains the source code of all implemented models in this project.\
 [unit_tests/](https://github.com/sonia1313/Action-Segmentation-for-Grocery-Picking/tree/master/models) tests to check preprocessing and data loader implemented in this project. \
 [utils/](https://github.com/sonia1313/Action-Segmentation-for-Grocery-Picking/tree/master/utils) a collection of scripts to run accuracy metrics, dataloading, data analysis and preprocessing.
