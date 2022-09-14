@@ -7,7 +7,7 @@ import torch
 import yaml
 
 from models.encoder_decoder_lstm import EncoderDecoderLSTM, LitEncoderDecoderLSTM
-from utils.preprocessing import *
+from utils.tactile_preprocessing import *
 import numpy as np
 import datatest as dt
 
@@ -238,19 +238,3 @@ def test_remove_padding(config_preprocess):
     assert outputs.shape[0] in lens
     assert targets.shape[0] in lens
 
-# def test_preprocess_dataset(
-#         PATH_TO_DIR='C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project'):
-#     files, labels = get_files(PATH_TO_DIR)
-#
-#     frames, action_segment_td, ground_truth_actions = read_data(files, labels)
-#     print(len(frames))
-#     print(len(action_segment_td))
-#     print(len(ground_truth_actions))
-#     frames = standardise_features(append_labels_per_frame(frames, action_segment_td, ground_truth_actions))
-#     print(len(frames))
-#     actions_per_seq, index_label_map = encode_labels(frames)
-#     print(len(actions_per_seq))
-#
-#     # X_data, y_data = pad_data(frames,actions_per_seq)
-#
-#     # return X_data, y_data
