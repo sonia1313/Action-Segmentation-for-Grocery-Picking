@@ -1,9 +1,8 @@
 from utils.optoforce_data_loader import load_data, OpToForceDataset
-from utils.preprocessing import *
+from utils.tactile_preprocessing import *
 from torch.utils.data import random_split, DataLoader
 
-PATH_TO_DIR = 'C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project'
-
+PATH_TO_DIR = 'TODO'
 
 def test_op_to_force_dataset(train_size = 20, val_size = 5, test_size = 5):
     X_data, y_data, index_label_map = preprocess_dataset(PATH_TO_DIR)
