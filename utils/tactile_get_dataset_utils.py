@@ -25,7 +25,7 @@ from utils.tactile_preprocessing import encode_labels, pad_data, standardise_fea
 #     'pad_data': True}  # preprocess_dataset()
 
 def get_dataset():
-    os.chdir("C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project")
+    os.chdir("TODO:change to local dir")
     print(os.getcwd())
     #3fps_clutter_single
 

@@ -5,11 +5,7 @@ import re
 import pandas as pd
 import numpy as np
 
-#
-# #if working in colab
-# os.chdir("/content/drive/Othercomputers/Dell")
-#
-# PATH_TO_DIR = os.chdir("/content/drive/Othercomputers/Dell")
+
 import torch
 
 np.random.seed(42)

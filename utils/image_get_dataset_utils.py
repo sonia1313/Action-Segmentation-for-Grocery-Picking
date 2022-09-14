@@ -11,7 +11,7 @@ import os
 
 
 def get_image_dataset(single:bool, clutter:bool):
-    os.chdir("C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project")
+    os.chdir("TODO")
 
     if single:
         img_dfs = torch.load('data/image/5fps/single_dataset_5fps.pt')

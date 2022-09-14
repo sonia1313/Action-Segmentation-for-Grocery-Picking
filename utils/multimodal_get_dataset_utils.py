@@ -15,7 +15,7 @@ import os
 
 
 def get_mm_dataset(single:bool, clutter:bool):
-    os.chdir("C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project")
+    os.chdir("TODO")
 
     if single:
         with open('data/multimodal/5fps/single_multi_modal_dataset_5fps.pkl','rb') as f:
