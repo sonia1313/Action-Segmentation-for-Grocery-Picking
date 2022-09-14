@@ -13,7 +13,7 @@ import datatest as dt
 
 CONFIG_PATH = "config"
 
-os.chdir("C:/Users/sonia/OneDrive - Queen Mary, University of London/Action-Segmentation-Project")
+os.chdir("TODO")
 
 
 def load_config(config_name):
